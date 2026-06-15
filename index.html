@@ -185,8 +185,20 @@ window.addEventListener('error', function(e){
           <option>Keller</option>
           <option>Feuchtraumkeller</option>
         </select></div>
-        <div id="shelfFieldsA" class="col-6"><label>Welches Regal?</label><input id="aShelf" placeholder="z. B. Regal A, R1, Wand links"></div>
-        <div id="shelfFieldsB" class="col-6"><label>Welches Fach?</label><input id="aShelfCompartment" placeholder="z. B. Fach 2, oben, B3"></div>
+        <div id="shelfFieldsA" class="col-6"><label>Welches Regal?</label><select id="aShelf">
+          <option value="">Bitte wählen</option>
+          <option>Regal 1</option>
+          <option>Regal 2</option>
+          <option>Regal 3</option>
+          <option>Regal 4</option>
+        </select></div>
+        <div id="shelfFieldsB" class="col-6"><label>Welches Fach?</label><select id="aShelfCompartment">
+          <option value="">Bitte wählen</option>
+          <option>Fach A</option>
+          <option>Fach B</option>
+          <option>Fach C</option>
+          <option>Fach D</option>
+        </select></div>
         <div class="col-4"><label>EK (€)</label><input id="aEK" type="number" step="0.01" oninput="calcVK()"></div>
         <div class="col-4"><label>VK (€) automatisch +30%</label><input id="aVK" type="number" step="0.01" readonly></div>
         <div class="col-4"><label>Bestand</label><input id="aStock" type="number" step="1" value="0"></div>
@@ -493,7 +505,7 @@ function toggleShelfFields(){
 function storageLabel(a){
   if(!a.storage_location)return '-';
   if(a.storage_location==='Regal'){
-    const parts=[a.storage_location,a.shelf,a.shelf_compartment].filter(Boolean);
+    const parts=[a.shelf,a.shelf_compartment].filter(Boolean);
     return parts.join(' · ') || 'Regal';
   }
   return a.storage_location;
