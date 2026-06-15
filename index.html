@@ -211,7 +211,7 @@ window.addEventListener('error', function(e){
         <div class="grid">
           <div class="col-6"><label>Kunde</label><input id="iCustomer"></div>
           <div class="col-6"><label>Projekt / Ticket</label><input id="iProject"></div>
-          <div class="col-6"><label>Zielort</label><input id="iDestination"></div>
+          <div class="col-6"><label>Zielort</label><input id="iDestination"></div><div class="col-6"><label>Adresse</label><input id="iAddress" placeholder="Straße, PLZ Ort"></div>
           <div class="col-6"><label>Status</label><select id="iStatus"><option>Vorbereitung</option><option>Verpackt</option><option>Versendet</option><option>Zugestellt</option></select></div>
           <div class="col-12"><label>Tracking-Link</label><input id="iTracking" oninput="showTrackingPreview()" placeholder="DHL/FedEx/UPS Link"></div>
           <div class="col-12"><small>Anzeige: <b id="trackingPreview">-</b></small></div>
@@ -599,7 +599,7 @@ async function saveIssue(){
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
-  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions]};
+  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions]};
   if(sb){
     const {error:eIssue}=await sb.from('lager_issues').insert({
       id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
@@ -629,7 +629,7 @@ async function saveIssue(){
     });
     state.issues.unshift(issue);persist();
   }
-  positions=[];['iCustomer','iProject','iDestination','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
+  positions=[];['iCustomer','iProject','iDestination','iAddress','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
 }
 
 async function cancelIssue(id){
@@ -734,7 +734,7 @@ function renderIssues(){
           ${['Vorbereitung','Verpackt','Versendet','Zugestellt','Storniert'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
-      <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}</p>
+      <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small></p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
         ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}')">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
