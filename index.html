@@ -196,10 +196,9 @@ window.addEventListener('error', function(e){
     <div class="card">
       <h2>📥 Wareneingang buchen</h2>
       <div class="grid">
-        <div class="col-4"><label>Artikel</label><select id="inArticle"></select></div>
+        <div class="col-6"><label>Artikel</label><select id="inArticle"></select></div>
         <div class="col-2"><label>Menge</label><input id="inQty" type="number" value="1"></div>
-        <div class="col-3"><label>Benutzer</label><input id="inUser" placeholder="Jan"></div>
-        <div class="col-3"><label>Kommentar</label><input id="inComment" placeholder="Wareneingang, Rückläufer ..."></div>
+        <div class="col-4"><label>Kommentar</label><input id="inComment" placeholder="Wareneingang, Rückläufer ..."></div>
       </div>
       <button style="margin-top:10px" onclick="bookIncoming()">Einlagern</button>
     </div>
@@ -217,7 +216,6 @@ window.addEventListener('error', function(e){
           <div class="col-12"><label>Tracking-Link</label><input id="iTracking" oninput="showTrackingPreview()" placeholder="DHL/FedEx/UPS Link"></div>
           <div class="col-12"><small>Anzeige: <b id="trackingPreview">-</b></small></div>
           <div class="col-12"><label>Verwendungszweck</label><textarea id="iPurpose"></textarea></div>
-          <div class="col-12"><label>Ersteller</label><input id="iUser" placeholder="Jan"></div>
         </div>
         <hr>
         <h3>Positionen</h3>
@@ -266,6 +264,7 @@ function money(n){return (Number(n)||0).toLocaleString('de-DE',{style:'currency'
 function now(){return new Date().toISOString()}
 function todayText(d){return new Date(d).toLocaleString('de-DE')}
 function toast(t){const el=document.createElement('div');el.className='toast';el.textContent=t;document.body.appendChild(el);setTimeout(()=>el.remove(),2600)}
+function currentUserName(){return user?.user_metadata?.name || user?.email || 'Unbekannt'}
 
 function loadLocal(){state=JSON.parse(localStorage.getItem(LS_KEY)||'{"articles":[],"issues":[],"history":[]}')}
 function saveLocal(){localStorage.setItem(LS_KEY,JSON.stringify(state))}
@@ -281,8 +280,6 @@ function showApp(){
   if(window.loginScreen) loginScreen.classList.add('hidden');
   const displayName = user?.user_metadata?.name || user?.email || 'Angemeldet';
   if(window.currentUserBadge) currentUserBadge.textContent = displayName;
-  if(window.inUser) inUser.value = displayName;
-  if(window.iUser) iUser.value = displayName;
 }
 
 function showLoginScreen(){
@@ -503,7 +500,7 @@ function resetArticleForm(){['articleId','aName','aBrand','aModel','aCategory','
 
 async function bookIncoming(){
   const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
-  const userName=inUser.value||user?.user_metadata?.name||user?.email||'Unbekannt';
+  const userName=currentUserName();
   if(sb){
     const newStock=(+a.stock||0)+qty;
     const {error:e1}=await sb.from('lager_articles').update({stock:newStock,updated_at:now()}).eq('id',a.id);
@@ -602,7 +599,7 @@ async function saveIssue(){
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
-  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:iUser.value.trim()||user?.user_metadata?.name||user?.email||'Unbekannt',positions:[...positions]};
+  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions]};
   if(sb){
     const {error:eIssue}=await sb.from('lager_issues').insert({
       id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
@@ -659,7 +656,7 @@ async function cancelIssue(id){
       article_id:p.article_id,
       article_name:p.article,
       qty:+p.qty||0,
-      user_name:user?.user_metadata?.name||user?.email||'Unbekannt',
+      user_name:currentUserName(),
       customer:issue.customer,
       project:issue.project,
       tracking_code:issue.tracking_code,
@@ -676,7 +673,7 @@ async function cancelIssue(id){
       state.history.unshift({
         id:uid(),type:'Storno',date:now(),issue_id:issue.id,issue_number:issue.number,
         article_id:p.article_id,article:p.article,qty:+p.qty||0,
-        user:user?.user_metadata?.name||user?.email||'Unbekannt',
+        user:currentUserName(),
         customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,
         serials:p.serials||'',comment:'Ausgabe storniert – Bestand zurückgebucht'
       });
