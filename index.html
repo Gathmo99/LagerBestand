@@ -275,6 +275,41 @@ function openSettings(){toast('Supabase ist fest eingebaut.')}
 function closeSettings(){}
 function saveSettings(){}
 
+
+function showApp(){
+  document.body.classList.remove('locked');
+  if(window.loginScreen) loginScreen.classList.add('hidden');
+  const displayName = user?.user_metadata?.name || user?.email || 'Angemeldet';
+  if(window.currentUserBadge) currentUserBadge.textContent = displayName;
+  if(window.inUser) inUser.value = displayName;
+  if(window.iUser) iUser.value = displayName;
+}
+
+function showLoginScreen(){
+  document.body.classList.add('locked');
+  if(window.loginScreen) loginScreen.classList.remove('hidden');
+  if(window.currentUserBadge) currentUserBadge.textContent='Nicht angemeldet';
+}
+
+function showRegister(){
+  loginMode.classList.add('hidden');
+  registerMode.classList.remove('hidden');
+}
+
+function showLogin(){
+  registerMode.classList.add('hidden');
+  loginMode.classList.remove('hidden');
+}
+
+function enterLocalMode(){
+  user={email:'Lokaler Testmodus',user_metadata:{name:'Lokaler Testmodus'}};
+  sb=null;
+  if(window.syncState) syncState.textContent='Lokalmodus';
+  showApp();
+  render();
+  toast('Lokalmodus aktiv – keine Cloud-Verbindung');
+}
+
 function initSupabase(){
   try{
     if(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase){
@@ -728,28 +763,6 @@ function exportCSV(type){
 function exportAll(){download('lager-backup.json',JSON.stringify(state,null,2),'application/json')}
 function download(name,content,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click()}
 
-function showLoginScreen(){
-  document.body.classList.add('locked');
-  document.getElementById('loginScreen').classList.remove('hidden');
-}
-function showApp(){
-  document.body.classList.remove('locked');
-  document.getElementById('loginScreen').classList.add('hidden');
-}
-function showLogin(){
-  document.getElementById('loginMode').classList.remove('hidden');
-  document.getElementById('registerMode').classList.add('hidden');
-}
-function showRegister(){
-  document.getElementById('loginMode').classList.add('hidden');
-  document.getElementById('registerMode').classList.remove('hidden');
-}
-function enterLocalMode(){
-  sb=null;
-  document.getElementById('syncState').textContent='Lokalmodus';
-  showApp();
-  toast('Lokalmodus aktiv – keine Cloud-Verbindung');
-}
 
 loadLocal();initSupabase();render();
 </script>
