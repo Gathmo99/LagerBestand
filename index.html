@@ -31,6 +31,7 @@ button.secondary{background:#293244;color:var(--text)}
 button.danger{background:var(--danger);color:#2b0610}
 button.warn{background:var(--warn);color:#291b00}
 button.blue{background:var(--blue);color:#071827}
+input[readonly]{opacity:.75;background:#151a27}.status.Storniert{color:#fb7185}
 button:disabled{opacity:.45;cursor:not-allowed}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -162,9 +163,23 @@ window.addEventListener('error', function(e){
         <div class="col-6"><label>Name</label><input id="aName"></div>
         <div class="col-6"><label>Marke</label><input id="aBrand"></div>
         <div class="col-6"><label>Modellnummer</label><input id="aModel"></div>
-        <div class="col-6"><label>Kategorie</label><input id="aCategory" placeholder="Drucker, ORB, Payment ..."></div>
-        <div class="col-4"><label>EK (€)</label><input id="aEK" type="number" step="0.01"></div>
-        <div class="col-4"><label>VK (€)</label><input id="aVK" type="number" step="0.01"></div>
+        <div class="col-6"><label>Kategorie</label><select id="aCategory">
+          <option value="">Bitte wählen</option>
+          <option>Drucker</option>
+          <option>ORB</option>
+          <option>SOT</option>
+          <option>OCU</option>
+          <option>DMB</option>
+          <option>Payment</option>
+          <option>Display</option>
+          <option>Android Box</option>
+          <option>Kabel</option>
+          <option>Zubehör</option>
+          <option>Ersatzteil</option>
+          <option>Sonstiges</option>
+        </select></div>
+        <div class="col-4"><label>EK (€)</label><input id="aEK" type="number" step="0.01" oninput="calcVK()"></div>
+        <div class="col-4"><label>VK (€) automatisch +30%</label><input id="aVK" type="number" step="0.01" readonly></div>
         <div class="col-4"><label>Bestand</label><input id="aStock" type="number" step="1" value="0"></div>
         <div class="col-6"><label>Mindestbestand</label><input id="aMin" type="number" step="1" value="0"></div>
         <div class="col-6"><label>Maße</label><input id="aDimensions" placeholder="L x B x H"></div>
@@ -419,9 +434,13 @@ function getArticle(id){return state.articles.find(a=>a.id===id)}
 function articleName(id){const a=getArticle(id);return a?`${a.name} ${a.brand? '('+a.brand+')':''}`:'Gelöschter Artikel'}
 
 function openArticleModal(){resetArticleForm();articleModal.classList.remove('hidden')}
+function calcVK(){
+  const ek=Number(aEK.value)||0;
+  aVK.value=ek ? (ek*1.3).toFixed(2) : '';
+}
 function closeArticleModal(){articleModal.classList.add('hidden')}
 async function saveArticle(){
-  const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),category:aCategory.value.trim(),ek:+aEK.value||0,vk:+aVK.value||0,stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),note:aNote.value.trim(),updated_at:now()};
+  const ekValue=+aEK.value||0; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),category:aCategory.value.trim(),ek:ekValue,vk:+(ekValue*1.3).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),note:aNote.value.trim(),updated_at:now()};
   if(!obj.name){toast('Name fehlt');return}
   if(sb){
     const {error}=await sb.from('lager_articles').upsert(cleanArticleForDb(obj));
@@ -434,7 +453,7 @@ async function saveArticle(){
   }
   resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
 }
-function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aCategory.value=a.category||'';aEK.value=a.ek||0;aVK.value=a.vk||0;aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aNote.value=a.note||'';articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
+function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aCategory.value=a.category||'';aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aNote.value=a.note||'';articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
 async function deleteArticle(id){
   if(!confirm('Artikel wirklich löschen?'))return;
   if(sb){
@@ -527,9 +546,63 @@ async function saveIssue(){
   }
   positions=[];['iCustomer','iProject','iDestination','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
 }
+
+async function cancelIssue(id){
+  const issue=state.issues.find(x=>x.id===id);
+  if(!issue){toast('Ausgabe nicht gefunden');return}
+  if(issue.status==='Storniert'){toast('Ausgabe ist bereits storniert');return}
+  if(!confirm('Ausgabe wirklich stornieren und Bestand zurückbuchen?'))return;
+
+  if(sb){
+    for(const p of issue.positions){
+      const a=getArticle(p.article_id);
+      if(a){
+        const {error:eStock}=await sb.from('lager_articles').update({stock:(+a.stock||0)+(+p.qty||0),updated_at:now()}).eq('id',a.id);
+        if(eStock){toast('Supabase Fehler: '+eStock.message);return}
+      }
+    }
+    const {error:eIssue}=await sb.from('lager_issues').update({status:'Storniert'}).eq('id',id);
+    if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
+
+    const histRows=issue.positions.map(p=>({
+      type:'Storno',
+      issue_id:issue.id,
+      issue_number:issue.number,
+      article_id:p.article_id,
+      article_name:p.article,
+      qty:+p.qty||0,
+      user_name:user?.user_metadata?.name||user?.email||'Unbekannt',
+      customer:issue.customer,
+      project:issue.project,
+      tracking_code:issue.tracking_code,
+      serials:p.serials||'',
+      comment:'Ausgabe storniert – Bestand zurückgebucht'
+    }));
+    const {error:eHist}=await sb.from('lager_history').insert(histRows);
+    if(eHist){toast('Supabase Fehler: '+eHist.message);return}
+    await syncDown();
+  } else {
+    issue.positions.forEach(p=>{
+      const a=getArticle(p.article_id);
+      if(a) a.stock=(+a.stock||0)+(+p.qty||0);
+      state.history.unshift({
+        id:uid(),type:'Storno',date:now(),issue_id:issue.id,issue_number:issue.number,
+        article_id:p.article_id,article:p.article,qty:+p.qty||0,
+        user:user?.user_metadata?.name||user?.email||'Unbekannt',
+        customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,
+        serials:p.serials||'',comment:'Ausgabe storniert – Bestand zurückgebucht'
+      });
+    });
+    issue.status='Storniert';
+    persist();
+  }
+  toast('Ausgabe storniert und Bestand zurückgebucht')
+}
+
 async function updateIssueStatus(id,val){
   const i=state.issues.find(x=>x.id===id);
   if(!i)return;
+  if(i.status==='Storniert'){toast('Stornierte Ausgaben können nicht geändert werden');render();return}
   if(sb){
     const {error}=await sb.from('lager_issues').update({status:val}).eq('id',id);
     if(error){toast('Supabase Fehler: '+error.message);return}
@@ -572,13 +645,16 @@ function renderIssues(){
     <div class="card" style="margin-bottom:10px;background:#131824">
       <div class="row" style="justify-content:space-between">
         <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_code||'-'}</small></div>
-        <select style="width:auto" onchange="updateIssueStatus('${i.id}',this.value)">
-          ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
+        <select style="width:auto" ${i.status==='Storniert'?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value)">
+          ${['Vorbereitung','Verpackt','Versendet','Zugestellt','Storniert'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
       <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
-      ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">Tracking öffnen</a>`:''}
+      <div class="row">
+        ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">Tracking öffnen</a>`:''}
+        ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}')">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
+      </div>
     </div>`).join('');
   issueList.innerHTML=items||'<small class="muted">Noch keine Ausgaben.</small>';
 }
