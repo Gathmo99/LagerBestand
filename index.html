@@ -52,6 +52,16 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 .position-box{border:1px dashed var(--line);border-radius:12px;padding:10px;margin:8px 0;background:#111522}
 .toast{position:fixed;right:18px;bottom:18px;background:#192236;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px rgba(0,0,0,.35);z-index:9}
 </style>
+<script>
+window.addEventListener('error', function(e){
+  document.body.classList.remove('locked');
+  const box=document.createElement('div');
+  box.style.cssText='position:fixed;inset:20px;background:#1b1b1b;color:#fff;border:2px solid #fb7185;border-radius:12px;padding:16px;z-index:99999;font-family:Arial;overflow:auto';
+  box.innerHTML='<h2>JavaScript-Fehler</h2><p>Die App konnte nicht starten:</p><pre>'+String(e.message)+'\n'+String(e.filename)+':'+String(e.lineno)+'</pre>';
+  document.body.appendChild(box);
+});
+</script>
+
 </head>
 <body class="locked">
 <div id="loginScreen" class="login-screen hidden">
@@ -256,22 +266,32 @@ function closeSettings(){}
 function saveSettings(){}
 
 function initSupabase(){
-  if(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase){
-    sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
-    syncState.textContent='Cloud verbunden';
-    sb.auth.getUser().then(({data})=>{
-      if(data?.user){
-        user=data.user;
-        showApp();
-        syncDown();
-        subscribeRealtime();
-      } else {
+  try{
+    if(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase){
+      sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+      syncState.textContent='Cloud verbunden';
+      sb.auth.getUser().then(({data})=>{
+        if(data && data.user){
+          user=data.user;
+          showApp();
+          syncDown();
+          subscribeRealtime();
+        } else {
+          showLoginScreen();
+        }
+      }).catch(err=>{
+        console.error(err);
+        syncState.textContent='Cloud Fehler';
         showLoginScreen();
-      }
-    });
-  } else {
-    sb=null;
-    syncState.textContent='Cloud nicht verbunden';
+      });
+    } else {
+      sb=null;
+      syncState.textContent='Cloud nicht verbunden';
+      showLoginScreen();
+    }
+  }catch(err){
+    console.error(err);
+    syncState.textContent='Startfehler';
     showLoginScreen();
   }
 }
