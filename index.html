@@ -771,7 +771,7 @@ function renderIssues(){
       <div class="row" style="justify-content:space-between">
         <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">${i.tracking_label||i.tracking_code||'Tracking öffnen'}</a>`:(i.tracking_label||i.tracking_code||'-')}</small></div>
         <select style="width:auto" ${i.status==='Storniert'?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value)">
-          ${['Vorbereitung','Verpackt','Versendet','Zugestellt','Storniert'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
+          ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
       <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small></p>
