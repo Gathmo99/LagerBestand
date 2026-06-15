@@ -12,6 +12,9 @@
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:Inter,Arial,sans-serif;background:radial-gradient(circle at top,#1b2435,#0f1117 55%);color:var(--text)}
+.login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}
+.login-box{max-width:520px;width:100%}
+body.locked header,body.locked main{display:none}
 header{padding:22px;display:flex;gap:14px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(15,17,23,.92);backdrop-filter:blur(10px);z-index:5}
 h1{margin:0;font-size:24px}
 small,.muted{color:var(--muted)}
@@ -50,27 +53,59 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 .toast{position:fixed;right:18px;bottom:18px;background:#192236;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px rgba(0,0,0,.35);z-index:9}
 </style>
 </head>
-<body>
+<body class="locked">
+<div id="loginScreen" class="login-screen hidden">
+  <div class="card login-box">
+    <h1>📦 Lagerverwaltung Login</h1>
+    <p class="muted">Melde dich an oder registriere dich. Danach öffnet sich das interne Lager.</p>
+
+    <div id="loginMode">
+      <label>E-Mail</label>
+      <input id="authEmail" type="email" autocomplete="email" placeholder="name@firma.de">
+      <label>Passwort</label>
+      <input id="authPassword" type="password" autocomplete="current-password" placeholder="Passwort">
+      <div class="row" style="margin-top:12px">
+        <button onclick="login()">Login</button>
+        <button class="secondary" onclick="showRegister()">Registrieren</button>
+      </div>
+      <button class="secondary" style="margin-top:10px;width:100%" onclick="resetPassword()">Passwort vergessen</button>
+    </div>
+
+    <div id="registerMode" class="hidden">
+      <label>Name</label>
+      <input id="authName" autocomplete="name" placeholder="Jan">
+      <label>E-Mail</label>
+      <input id="regEmail" type="email" autocomplete="email" placeholder="name@firma.de">
+      <label>Passwort</label>
+      <input id="regPassword" type="password" autocomplete="new-password" placeholder="Mindestens 6 Zeichen">
+      <div class="row" style="margin-top:12px">
+        <button onclick="register()">Account erstellen</button>
+        <button class="secondary" onclick="showLogin()">Zurück zum Login</button>
+      </div>
+    </div>
+
+    <hr>
+    <small>Cloud-Verbindung ist fest hinterlegt. Lokal testen ist nur als Notfallmodus gedacht.</small>
+    <div class="row" style="margin-top:12px">
+      <button class="warn" onclick="enterLocalMode()">Nur lokal testen</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <div>
     <h1>📦 Lagerverwaltung Intern</h1>
     <small>Artikel, Wareneingänge, Sammel-Ausgaben, Tracking & Historie</small>
   </div>
   <div class="row">
+    <span id="currentUserBadge" class="badge">Nicht angemeldet</span>
     <span id="syncState" class="badge">Lokalmodus</span>
-    <button class="secondary" onclick="openSettings()">Supabase</button>
     <button class="secondary" onclick="exportAll()">Backup JSON</button>
+    <button class="danger" onclick="logout()">Logout</button>
   </div>
 </header>
 
 <main>
-  <div id="authCard" class="card hidden">
-    <h2>Login</h2>
-    <div class="grid">
-      <div class="col-4"><label>E-Mail</label><input id="authEmail" type="email"></div>
-      <div class="col-4"><label>Passwort</label><input id="authPassword" type="password"></div>
-      <div class="col-4"><label>Name bei Registrierung</label><input id="authName"></div>
-    </div>
     <div class="row" style="margin-top:10px">
       <button onclick="login()">Login</button>
       <button class="secondary" onclick="register()">Registrieren</button>
@@ -197,20 +232,11 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
   </section>
 </main>
 
-<div id="settings" class="toast hidden">
-  <h3>Supabase Einstellungen</h3>
-  <label>Supabase URL</label><input id="setUrl">
-  <label>Anon Key</label><input id="setKey">
-  <div class="row" style="margin-top:10px">
-    <button onclick="saveSettings()">Speichern</button>
-    <button class="secondary" onclick="closeSettings()">Schließen</button>
-  </div>
-  <small>Ohne Daten läuft die App lokal im Browser.</small>
-</div>
-
 <script>
 const LS_KEY='lagerverwaltung_v3';
 const SETTINGS_KEY='lagerverwaltung_settings';
+const SUPABASE_URL='https://tcnnuojbmglojdvybyxu.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjbm51b2pibWdsb2pkdnlieXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MTg1OTgsImV4cCI6MjA5NzA5NDU5OH0.8n7RwN5dQxxZQtf5Lgjm1bSjXrLoWvPIr3_hgBQalRs';
 let state={articles:[],issues:[],history:[]};
 let positions=[];
 let sb=null, user=null;
@@ -225,45 +251,71 @@ function loadLocal(){state=JSON.parse(localStorage.getItem(LS_KEY)||'{"articles"
 function saveLocal(){localStorage.setItem(LS_KEY,JSON.stringify(state))}
 function persist(){saveLocal(); syncUp(); render()}
 
-function openSettings(){document.getElementById('settings').classList.remove('hidden'); const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}');setUrl.value=s.url||'';setKey.value=s.key||''}
-function closeSettings(){settings.classList.add('hidden')}
-function saveSettings(){localStorage.setItem(SETTINGS_KEY,JSON.stringify({url:setUrl.value.trim(),key:setKey.value.trim()}));initSupabase();closeSettings();toast('Einstellungen gespeichert')}
+function openSettings(){toast('Supabase ist fest eingebaut.')}
+function closeSettings(){}
+function saveSettings(){}
+
 function initSupabase(){
-  const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}');
-  if(s.url&&s.key&&window.supabase){
-    sb=window.supabase.createClient(s.url,s.key);
-    syncState.textContent='Supabase bereit';
-    authCard.classList.remove('hidden');
-    sb.auth.getUser().then(({data})=>{ if(data?.user){ user=data.user; syncDown(); subscribeRealtime(); }});
+  if(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase){
+    sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+    syncState.textContent='Cloud verbunden';
+    sb.auth.getUser().then(({data})=>{
+      if(data?.user){
+        user=data.user;
+        showApp();
+        syncDown();
+        subscribeRealtime();
+      } else {
+        showLoginScreen();
+      }
+    });
   } else {
     sb=null;
-    syncState.textContent='Lokalmodus';
-    authCard.classList.add('hidden');
+    syncState.textContent='Cloud nicht verbunden';
+    showLoginScreen();
   }
 }
 
 async function login(){
-  if(!sb)return;
-  const {data,error}=await sb.auth.signInWithPassword({email:authEmail.value,password:authPassword.value});
-  if(error)toast(error.message);
-  else {user=data.user; toast('Eingeloggt'); await syncDown(); subscribeRealtime();}
+  if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
+  const {data,error}=await sb.auth.signInWithPassword({email:authEmail.value.trim(),password:authPassword.value});
+  if(error){toast(error.message);return;}
+  user=data.user;
+  showApp();
+  toast('Eingeloggt');
+  await syncDown();
+  subscribeRealtime();
 }
 
 async function register(){
-  if(!sb)return;
-  const {data,error}=await sb.auth.signUp({email:authEmail.value,password:authPassword.value,options:{data:{name:authName.value}}});
-  if(error)toast(error.message);
-  else {
-    toast('Registriert. Falls E-Mail-Bestätigung aktiv ist, bitte bestätigen.');
-    if(data?.user){
-      await sb.from('lager_profiles').upsert({id:data.user.id,email:authEmail.value,name:authName.value||authEmail.value});
-    }
+  if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
+  const name=authName.value.trim();
+  const email=regEmail.value.trim();
+  const password=regPassword.value;
+  if(!name || !email || !password){toast('Name, E-Mail und Passwort ausfüllen.');return;}
+  const {data,error}=await sb.auth.signUp({email,password,options:{data:{name}}});
+  if(error){toast(error.message);return;}
+  if(data?.user){
+    await sb.from('lager_profiles').upsert({id:data.user.id,email,name});
   }
+  toast('Registriert. Falls E-Mail-Bestätigung aktiv ist, bitte bestätigen und danach einloggen.');
+  authEmail.value=email;
+  showLogin();
+}
+
+async function resetPassword(){
+  if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
+  const email=authEmail.value.trim();
+  if(!email){toast('Bitte E-Mail eintragen.');return;}
+  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.href});
+  if(error)toast(error.message);
+  else toast('Reset-Link wurde verschickt.');
 }
 
 async function logout(){
   if(sb)await sb.auth.signOut();
   user=null;
+  showLoginScreen();
   toast('Ausgeloggt');
 }
 
@@ -306,7 +358,7 @@ function historyFromDb(h){
 async function syncUp(){
   // Supabase-first: einzelne Aktionen schreiben direkt in Tabellen.
   // Diese Funktion bleibt absichtlich leichtgewichtig, damit lokaler Fallback weiter sauber läuft.
-  if(sb) syncState.textContent='Supabase aktiv';
+  if(sb) syncState.textContent='Cloud aktiv';
 }
 
 async function syncDown(){
