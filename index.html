@@ -116,12 +116,7 @@ window.addEventListener('error', function(e){
 </header>
 
 <main>
-    <div class="row" style="margin-top:10px">
-      <button onclick="login()">Login</button>
-      <button class="secondary" onclick="register()">Registrieren</button>
-      <button class="danger" onclick="logout()">Logout</button>
-    </div>
-  </div>
+    <!-- Login/Logout-Schnellzugriff entfernt (wird über Login-Screen gesteuert) -->
 
   <div class="tabs">
     <button class="tab active" onclick="showTab('dashboard',this)">Dashboard</button>
@@ -604,6 +599,29 @@ function exportCSV(type){
 }
 function exportAll(){download('lager-backup.json',JSON.stringify(state,null,2),'application/json')}
 function download(name,content,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click()}
+
+function showLoginScreen(){
+  document.body.classList.add('locked');
+  document.getElementById('loginScreen').classList.remove('hidden');
+}
+function showApp(){
+  document.body.classList.remove('locked');
+  document.getElementById('loginScreen').classList.add('hidden');
+}
+function showLogin(){
+  document.getElementById('loginMode').classList.remove('hidden');
+  document.getElementById('registerMode').classList.add('hidden');
+}
+function showRegister(){
+  document.getElementById('loginMode').classList.add('hidden');
+  document.getElementById('registerMode').classList.remove('hidden');
+}
+function enterLocalMode(){
+  sb=null;
+  document.getElementById('syncState').textContent='Lokalmodus';
+  showApp();
+  toast('Lokalmodus aktiv – keine Cloud-Verbindung');
+}
 
 loadLocal();initSupabase();render();
 </script>
