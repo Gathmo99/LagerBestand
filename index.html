@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lagerverwaltung Intern</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#f2f4f8;--muted:#9ba3b4;
+  --accent:#6ee7b7;--danger:#fb7185;--warn:#fbbf24;--line:#2b3040;--blue:#60a5fa;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,Arial,sans-serif;background:radial-gradient(circle at top,#1b2435,#0f1117 55%);color:var(--text)}
+header{padding:22px;display:flex;gap:14px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(15,17,23,.92);backdrop-filter:blur(10px);z-index:5}
+h1{margin:0;font-size:24px}
+small,.muted{color:var(--muted)}
+main{padding:18px;max-width:1500px;margin:0 auto}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+.card{background:linear-gradient(180deg,var(--panel),#141720);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.22)}
+.col-3{grid-column:span 3}.col-4{grid-column:span 4}.col-5{grid-column:span 5}.col-6{grid-column:span 6}.col-7{grid-column:span 7}.col-8{grid-column:span 8}.col-12{grid-column:span 12}
+@media(max-width:950px){.col-3,.col-4,.col-5,.col-6,.col-7,.col-8{grid-column:span 12}header{display:block}}
+input,select,textarea{width:100%;padding:10px 11px;border-radius:10px;border:1px solid var(--line);background:#0f1320;color:var(--text);outline:none}
+textarea{min-height:76px;resize:vertical}
+label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+button{border:0;border-radius:10px;padding:10px 13px;background:var(--accent);color:#052016;font-weight:700;cursor:pointer}
+button.secondary{background:#293244;color:var(--text)}
+button.danger{background:var(--danger);color:#2b0610}
+button.warn{background:var(--warn);color:#291b00}
+button.blue{background:var(--blue);color:#071827}
+button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.tab{background:#202638;color:var(--text)}
+.tab.active{background:var(--accent);color:#052016}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{text-align:left;color:var(--muted);font-size:12px}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;background:#263044;color:#dbeafe;font-size:12px;margin:2px}
+.low{background:#3b1520;color:#fecdd3}
+.ok{background:#153325;color:#bbf7d0}
+.status{font-weight:700}
+.status.Vorbereitung{color:#fbbf24}.status.Verpackt{color:#fdba74}.status.Versendet{color:#93c5fd}.status.Zugestellt{color:#86efac}
+.hidden{display:none!important}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:20;padding:16px}.modal .card{max-width:760px;width:100%;max-height:92vh;overflow:auto}
+hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+.kpi{font-size:28px;font-weight:800}
+.search{margin:0 0 12px}
+.position-box{border:1px dashed var(--line);border-radius:12px;padding:10px;margin:8px 0;background:#111522}
+.toast{position:fixed;right:18px;bottom:18px;background:#192236;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px rgba(0,0,0,.35);z-index:9}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>📦 Lagerverwaltung Intern</h1>
+    <small>Artikel, Wareneingänge, Sammel-Ausgaben, Tracking & Historie</small>
+  </div>
+  <div class="row">
+    <span id="syncState" class="badge">Lokalmodus</span>
+    <button class="secondary" onclick="openSettings()">Supabase</button>
+    <button class="secondary" onclick="exportAll()">Backup JSON</button>
+  </div>
+</header>
+
+<main>
+  <div id="authCard" class="card hidden">
+    <h2>Login</h2>
+    <div class="grid">
+      <div class="col-4"><label>E-Mail</label><input id="authEmail" type="email"></div>
+      <div class="col-4"><label>Passwort</label><input id="authPassword" type="password"></div>
+      <div class="col-4"><label>Name bei Registrierung</label><input id="authName"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button onclick="login()">Login</button>
+      <button class="secondary" onclick="register()">Registrieren</button>
+      <button class="danger" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('dashboard',this)">Dashboard</button>
+    <button class="tab" onclick="showTab('articles',this)">Artikel</button>
+    <button class="tab" onclick="showTab('incoming',this)">Wareneingang</button>
+    <button class="tab" onclick="showTab('issues',this)">Ausgaben</button>
+    <button class="tab" onclick="showTab('history',this)">Historie</button>
+  </div>
+
+  <section id="dashboard" class="view">
+    <div class="grid">
+      <div class="card col-3"><small>Artikel</small><div class="kpi" id="kpiArticles">0</div></div>
+      <div class="card col-3"><small>Gesamtbestand</small><div class="kpi" id="kpiStock">0</div></div>
+      <div class="card col-3"><small>Lagerwert EK</small><div class="kpi" id="kpiEK">0 €</div></div>
+      <div class="card col-3"><small>Lagerwert VK</small><div class="kpi" id="kpiVK">0 €</div></div>
+      <div class="card col-6"><h3>Niedrige Bestände</h3><div id="lowStockList"></div></div>
+      <div class="card col-6"><h3>Letzte Bewegungen</h3><div id="recentHistory"></div></div>
+    </div>
+  </section>
+
+  <section id="articles" class="view hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <div>
+          <h2 style="margin:0">Artikelbestand</h2>
+          <small>Bestand zuerst. Artikel anlegen oder bearbeiten öffnet als Fenster.</small>
+        </div>
+        <button onclick="openArticleModal()">+ Artikel anlegen</button>
+      </div>
+      <input class="search" id="articleSearch" oninput="render()" placeholder="Suche nach Name, Marke, Modellnummer, Kategorie ...">
+      <div style="overflow:auto"><table id="articleTable"></table></div>
+    </div>
+  </section>
+
+  <div id="articleModal" class="modal hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="articleFormTitle" style="margin:0">Artikel anlegen</h2>
+        <button class="secondary" onclick="closeArticleModal()">Schließen</button>
+      </div>
+      <input id="articleId" type="hidden">
+      <div class="grid">
+        <div class="col-6"><label>Name</label><input id="aName"></div>
+        <div class="col-6"><label>Marke</label><input id="aBrand"></div>
+        <div class="col-6"><label>Modellnummer</label><input id="aModel"></div>
+        <div class="col-6"><label>Kategorie</label><input id="aCategory" placeholder="Drucker, ORB, Payment ..."></div>
+        <div class="col-4"><label>EK (€)</label><input id="aEK" type="number" step="0.01"></div>
+        <div class="col-4"><label>VK (€)</label><input id="aVK" type="number" step="0.01"></div>
+        <div class="col-4"><label>Bestand</label><input id="aStock" type="number" step="1" value="0"></div>
+        <div class="col-6"><label>Mindestbestand</label><input id="aMin" type="number" step="1" value="0"></div>
+        <div class="col-6"><label>Maße</label><input id="aDimensions" placeholder="L x B x H"></div>
+        <div class="col-12"><label>Notiz / Lieferant / sonstiges</label><textarea id="aNote"></textarea></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button onclick="saveArticle()">Speichern</button>
+        <button class="secondary" onclick="resetArticleForm()">Leeren</button>
+      </div>
+    </div>
+  </div>
+
+  <section id="incoming" class="view hidden">
+    <div class="card">
+      <h2>📥 Wareneingang buchen</h2>
+      <div class="grid">
+        <div class="col-4"><label>Artikel</label><select id="inArticle"></select></div>
+        <div class="col-2"><label>Menge</label><input id="inQty" type="number" value="1"></div>
+        <div class="col-3"><label>Benutzer</label><input id="inUser" placeholder="Jan"></div>
+        <div class="col-3"><label>Kommentar</label><input id="inComment" placeholder="Wareneingang, Rückläufer ..."></div>
+      </div>
+      <button style="margin-top:10px" onclick="bookIncoming()">Einlagern</button>
+    </div>
+  </section>
+
+  <section id="issues" class="view hidden">
+    <div class="grid">
+      <div class="card col-5">
+        <h2>🚚 Ausgabe erstellen</h2>
+        <div class="grid">
+          <div class="col-6"><label>Kunde</label><input id="iCustomer"></div>
+          <div class="col-6"><label>Projekt / Ticket</label><input id="iProject"></div>
+          <div class="col-6"><label>Zielort</label><input id="iDestination"></div>
+          <div class="col-6"><label>Status</label><select id="iStatus"><option>Vorbereitung</option><option>Verpackt</option><option>Versendet</option><option>Zugestellt</option></select></div>
+          <div class="col-12"><label>Tracking-Link</label><input id="iTracking" oninput="showTrackingPreview()" placeholder="DHL/FedEx/UPS Link"></div>
+          <div class="col-12"><small>Anzeige: <b id="trackingPreview">-</b></small></div>
+          <div class="col-12"><label>Verwendungszweck</label><textarea id="iPurpose"></textarea></div>
+          <div class="col-12"><label>Ersteller</label><input id="iUser" placeholder="Jan"></div>
+        </div>
+        <hr>
+        <h3>Positionen</h3>
+        <div class="grid">
+          <div class="col-6"><label>Artikel</label><select id="posArticle"></select></div>
+          <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1"></div>
+          <div class="col-3"><label>Seriennummer(n)</label><input id="posSerial" placeholder="optional"></div>
+        </div>
+        <button class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
+        <div id="positionsList"></div>
+        <button style="margin-top:12px" onclick="saveIssue()">Ausgabe speichern</button>
+      </div>
+
+      <div class="card col-7">
+        <h2>Ausgaben</h2>
+        <input class="search" id="issueSearch" oninput="render()" placeholder="Suche Kunde, Projekt, Tracking, Seriennummer ...">
+        <div id="issueList"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="history" class="view hidden">
+    <div class="card">
+      <h2>📜 Historie</h2>
+      <div class="row">
+        <input id="historySearch" oninput="render()" placeholder="Suche Artikel, Kunde, Seriennummer, Tracking ..." style="flex:1">
+        <button class="secondary" onclick="exportCSV('articles')">Artikel CSV</button>
+        <button class="secondary" onclick="exportCSV('history')">Historie CSV</button>
+      </div>
+      <div style="overflow:auto;margin-top:10px"><table id="historyTable"></table></div>
+    </div>
+  </section>
+</main>
+
+<div id="settings" class="toast hidden">
+  <h3>Supabase Einstellungen</h3>
+  <label>Supabase URL</label><input id="setUrl">
+  <label>Anon Key</label><input id="setKey">
+  <div class="row" style="margin-top:10px">
+    <button onclick="saveSettings()">Speichern</button>
+    <button class="secondary" onclick="closeSettings()">Schließen</button>
+  </div>
+  <small>Ohne Daten läuft die App lokal im Browser.</small>
+</div>
+
+<script>
+const LS_KEY='lagerverwaltung_v3';
+const SETTINGS_KEY='lagerverwaltung_settings';
+let state={articles:[],issues:[],history:[]};
+let positions=[];
+let sb=null, user=null;
+
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
+function money(n){return (Number(n)||0).toLocaleString('de-DE',{style:'currency',currency:'EUR'})}
+function now(){return new Date().toISOString()}
+function todayText(d){return new Date(d).toLocaleString('de-DE')}
+function toast(t){const el=document.createElement('div');el.className='toast';el.textContent=t;document.body.appendChild(el);setTimeout(()=>el.remove(),2600)}
+
+function loadLocal(){state=JSON.parse(localStorage.getItem(LS_KEY)||'{"articles":[],"issues":[],"history":[]}')}
+function saveLocal(){localStorage.setItem(LS_KEY,JSON.stringify(state))}
+function persist(){saveLocal(); syncUp(); render()}
+
+function openSettings(){document.getElementById('settings').classList.remove('hidden'); const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}');setUrl.value=s.url||'';setKey.value=s.key||''}
+function closeSettings(){settings.classList.add('hidden')}
+function saveSettings(){localStorage.setItem(SETTINGS_KEY,JSON.stringify({url:setUrl.value.trim(),key:setKey.value.trim()}));initSupabase();closeSettings();toast('Einstellungen gespeichert')}
+function initSupabase(){
+  const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}');
+  if(s.url&&s.key&&window.supabase){
+    sb=window.supabase.createClient(s.url,s.key);
+    syncState.textContent='Supabase bereit';
+    authCard.classList.remove('hidden');
+    sb.auth.getUser().then(({data})=>{ if(data?.user){ user=data.user; syncDown(); subscribeRealtime(); }});
+  } else {
+    sb=null;
+    syncState.textContent='Lokalmodus';
+    authCard.classList.add('hidden');
+  }
+}
+
+async function login(){
+  if(!sb)return;
+  const {data,error}=await sb.auth.signInWithPassword({email:authEmail.value,password:authPassword.value});
+  if(error)toast(error.message);
+  else {user=data.user; toast('Eingeloggt'); await syncDown(); subscribeRealtime();}
+}
+
+async function register(){
+  if(!sb)return;
+  const {data,error}=await sb.auth.signUp({email:authEmail.value,password:authPassword.value,options:{data:{name:authName.value}}});
+  if(error)toast(error.message);
+  else {
+    toast('Registriert. Falls E-Mail-Bestätigung aktiv ist, bitte bestätigen.');
+    if(data?.user){
+      await sb.from('lager_profiles').upsert({id:data.user.id,email:authEmail.value,name:authName.value||authEmail.value});
+    }
+  }
+}
+
+async function logout(){
+  if(sb)await sb.auth.signOut();
+  user=null;
+  toast('Ausgeloggt');
+}
+
+function cleanArticleForDb(a){
+  return {
+    id:a.id,name:a.name||'',brand:a.brand||'',model:a.model||'',category:a.category||'',
+    ek:+a.ek||0,vk:+a.vk||0,stock:+a.stock||0,min_stock:+a.min||0,
+    dimensions:a.dimensions||'',note:a.note||'',updated_at:now()
+  };
+}
+
+function articleFromDb(a){
+  return {
+    id:a.id,name:a.name,brand:a.brand,model:a.model,category:a.category,
+    ek:+a.ek||0,vk:+a.vk||0,stock:+a.stock||0,min:+a.min_stock||0,
+    dimensions:a.dimensions,note:a.note,updated_at:a.updated_at
+  };
+}
+
+function issueFromDb(i, positions){
+  return {
+    id:i.id,number:i.number,date:i.created_at,customer:i.customer||'',project:i.project||'',
+    destination:i.destination||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
+    tracking_code:i.tracking_code||'',status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',
+    positions:(positions||[]).filter(p=>p.issue_id===i.id).map(p=>({
+      article_id:p.article_id,article:p.article_name||articleName(p.article_id),qty:+p.qty||0,serials:p.serials||''
+    }))
+  };
+}
+
+function historyFromDb(h){
+  return {
+    id:h.id,type:h.type,date:h.created_at,issue_id:h.issue_id,issue_number:h.issue_number,
+    article_id:h.article_id,article:h.article_name||articleName(h.article_id),qty:+h.qty||0,
+    user:h.user_name||'Unbekannt',customer:h.customer||'',project:h.project||'',
+    tracking_code:h.tracking_code||'',serials:h.serials||'',comment:h.comment||''
+  };
+}
+
+async function syncUp(){
+  // Supabase-first: einzelne Aktionen schreiben direkt in Tabellen.
+  // Diese Funktion bleibt absichtlich leichtgewichtig, damit lokaler Fallback weiter sauber läuft.
+  if(sb) syncState.textContent='Supabase aktiv';
+}
+
+async function syncDown(){
+  if(!sb)return;
+  try{
+    const [articlesRes, issuesRes, posRes, histRes] = await Promise.all([
+      sb.from('lager_articles').select('*').order('name'),
+      sb.from('lager_issues').select('*').order('created_at',{ascending:false}),
+      sb.from('lager_issue_positions').select('*'),
+      sb.from('lager_history').select('*').order('created_at',{ascending:false})
+    ]);
+    if(articlesRes.error) throw articlesRes.error;
+    if(issuesRes.error) throw issuesRes.error;
+    if(posRes.error) throw posRes.error;
+    if(histRes.error) throw histRes.error;
+
+    state.articles=(articlesRes.data||[]).map(articleFromDb);
+    state.issues=(issuesRes.data||[]).map(i=>issueFromDb(i,posRes.data||[]));
+    state.history=(histRes.data||[]).map(historyFromDb);
+    saveLocal();
+    render();
+    syncState.textContent='Cloud-Sync OK';
+  } catch(e){
+    console.error(e);
+    syncState.textContent='Cloud-Sync Fehler';
+    toast('Supabase Fehler: '+(e.message||e));
+  }
+}
+
+let realtimeChannel=null;
+function subscribeRealtime(){
+  if(!sb || realtimeChannel)return;
+  realtimeChannel=sb.channel('lager-realtime')
+    .on('postgres_changes',{event:'*',schema:'public',table:'lager_articles'},()=>syncDown())
+    .on('postgres_changes',{event:'*',schema:'public',table:'lager_issues'},()=>syncDown())
+    .on('postgres_changes',{event:'*',schema:'public',table:'lager_issue_positions'},()=>syncDown())
+    .on('postgres_changes',{event:'*',schema:'public',table:'lager_history'},()=>syncDown())
+    .subscribe();
+}
+
+function showTab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');render()}
+function getArticle(id){return state.articles.find(a=>a.id===id)}
+function articleName(id){const a=getArticle(id);return a?`${a.name} ${a.brand? '('+a.brand+')':''}`:'Gelöschter Artikel'}
+
+function openArticleModal(){resetArticleForm();articleModal.classList.remove('hidden')}
+function closeArticleModal(){articleModal.classList.add('hidden')}
+async function saveArticle(){
+  const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),category:aCategory.value.trim(),ek:+aEK.value||0,vk:+aVK.value||0,stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),note:aNote.value.trim(),updated_at:now()};
+  if(!obj.name){toast('Name fehlt');return}
+  if(sb){
+    const {error}=await sb.from('lager_articles').upsert(cleanArticleForDb(obj));
+    if(error){toast('Supabase Fehler: '+error.message);return}
+    await syncDown();
+  } else {
+    const i=state.articles.findIndex(a=>a.id===obj.id);
+    if(i>=0)state.articles[i]={...state.articles[i],...obj}; else state.articles.push(obj);
+    persist();
+  }
+  resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
+}
+function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aCategory.value=a.category||'';aEK.value=a.ek||0;aVK.value=a.vk||0;aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aNote.value=a.note||'';articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
+async function deleteArticle(id){
+  if(!confirm('Artikel wirklich löschen?'))return;
+  if(sb){
+    const {error}=await sb.from('lager_articles').delete().eq('id',id);
+    if(error){toast('Supabase Fehler: '+error.message);return}
+    await syncDown();
+  } else {
+    state.articles=state.articles.filter(a=>a.id!==id);persist();
+  }
+}
+function resetArticleForm(){['articleId','aName','aBrand','aModel','aCategory','aEK','aVK','aStock','aMin','aDimensions','aNote'].forEach(id=>document.getElementById(id).value='');aStock.value=0;aMin.value=0;articleFormTitle.textContent='Artikel anlegen'}
+
+async function bookIncoming(){
+  const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
+  const userName=inUser.value||user?.user_metadata?.name||user?.email||'Unbekannt';
+  if(sb){
+    const newStock=(+a.stock||0)+qty;
+    const {error:e1}=await sb.from('lager_articles').update({stock:newStock,updated_at:now()}).eq('id',a.id);
+    if(e1){toast('Supabase Fehler: '+e1.message);return}
+    const {error:e2}=await sb.from('lager_history').insert({
+      type:'Wareneingang',article_id:a.id,article_name:a.name,qty:qty,user_name:userName,
+      comment:inComment.value||'',customer:'',project:'',tracking_code:'',serials:''
+    });
+    if(e2){toast('Supabase Fehler: '+e2.message);return}
+    await syncDown();
+  } else {
+    a.stock=(+a.stock||0)+qty;
+    state.history.unshift({id:uid(),type:'Wareneingang',date:now(),article_id:a.id,article:a.name,qty,user:userName,comment:inComment.value||'',customer:'',project:'',tracking_code:'',serials:''});
+    persist();
+  }
+  inQty.value=1;inComment.value='';toast('Wareneingang gebucht')
+}
+
+function extractTrackingCode(url){
+  const raw=(url||'').trim(); if(!raw)return '';
+  try{
+    const u=new URL(raw);
+    const keys=['trackingNumber','trackingnumber','tracking-id','tracknum','piececode','id','q','nums','AWB','awb'];
+    for(const k of keys){const v=u.searchParams.get(k); if(v&&/[A-Z0-9]{6,}/i.test(v))return v.replace(/[^A-Z0-9-]/gi,'')}
+    const parts=u.pathname.split('/').filter(Boolean).reverse();
+    for(const p of parts){const clean=decodeURIComponent(p).replace(/[^A-Z0-9-]/gi,''); if(/[A-Z0-9]{8,}/i.test(clean))return clean}
+  }catch(e){}
+  const m=raw.match(/[A-Z0-9][A-Z0-9-]{7,}[A-Z0-9]/i);
+  return m?m[0]:'';
+}
+function showTrackingPreview(){trackingPreview.textContent=extractTrackingCode(iTracking.value)||'-'}
+function addPosition(){
+  const a=getArticle(posArticle.value), qty=+posQty.value||0; if(!a||qty<=0){toast('Position prüfen');return}
+  if(qty>(+a.stock||0)){toast('Nicht genug Bestand');return}
+  positions.push({article_id:a.id,article:a.name,qty,serials:posSerial.value.trim()});
+  posQty.value=1;posSerial.value='';renderPositions()
+}
+function removePosition(i){positions.splice(i,1);renderPositions()}
+function renderPositions(){
+  positionsList.innerHTML=positions.map((p,i)=>`<div class="position-box"><b>${p.qty} × ${p.article}</b><br><small>Seriennummer: ${p.serials||'-'}</small><br><button class="danger" onclick="removePosition(${i})">Entfernen</button></div>`).join('')||'<small class="muted">Noch keine Positionen.</small>'
+}
+async function saveIssue(){
+  if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
+  if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
+  for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
+  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),status:iStatus.value,user:iUser.value.trim()||user?.user_metadata?.name||user?.email||'Unbekannt',positions:[...positions]};
+  if(sb){
+    const {error:eIssue}=await sb.from('lager_issues').insert({
+      id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
+      purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,status:issue.status,created_by_name:issue.user
+    });
+    if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
+    const dbPositions=issue.positions.map(p=>({issue_id:issue.id,article_id:p.article_id,article_name:p.article,qty:p.qty,serials:p.serials||''}));
+    const {error:ePos}=await sb.from('lager_issue_positions').insert(dbPositions);
+    if(ePos){toast('Supabase Fehler: '+ePos.message);return}
+    for(const p of issue.positions){
+      const a=getArticle(p.article_id);
+      const {error:eStock}=await sb.from('lager_articles').update({stock:(+a.stock||0)-p.qty,updated_at:now()}).eq('id',a.id);
+      if(eStock){toast('Supabase Fehler: '+eStock.message);return}
+    }
+    const histRows=issue.positions.map(p=>({
+      type:'Ausgabe',issue_id:issue.id,issue_number:issue.number,article_id:p.article_id,article_name:p.article,
+      qty:-p.qty,user_name:issue.user,customer:issue.customer,project:issue.project,
+      tracking_code:issue.tracking_code,serials:p.serials||'',comment:issue.purpose
+    }));
+    const {error:eHist}=await sb.from('lager_history').insert(histRows);
+    if(eHist){toast('Supabase Fehler: '+eHist.message);return}
+    await syncDown();
+  } else {
+    issue.positions.forEach(p=>{
+      const a=getArticle(p.article_id); a.stock=(+a.stock||0)-p.qty;
+      state.history.unshift({id:uid(),type:'Ausgabe',date:issue.date,issue_id:issue.id,issue_number:issue.number,article_id:a.id,article:a.name,qty:-p.qty,user:issue.user,customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,serials:p.serials,comment:issue.purpose});
+    });
+    state.issues.unshift(issue);persist();
+  }
+  positions=[];['iCustomer','iProject','iDestination','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
+}
+async function updateIssueStatus(id,val){
+  const i=state.issues.find(x=>x.id===id);
+  if(!i)return;
+  if(sb){
+    const {error}=await sb.from('lager_issues').update({status:val}).eq('id',id);
+    if(error){toast('Supabase Fehler: '+error.message);return}
+    await syncDown();
+  } else {
+    i.status=val;persist();
+  }
+}
+
+function render(){
+  renderSelects();renderDashboard();renderArticles();renderIssues();renderHistory();renderPositions()
+}
+function renderSelects(){
+  const opts=state.articles.map(a=>`<option value="${a.id}">${a.name} | Bestand: ${a.stock||0}</option>`).join('');
+  inArticle.innerHTML=opts;posArticle.innerHTML=opts;
+}
+function renderDashboard(){
+  kpiArticles.textContent=state.articles.length;
+  kpiStock.textContent=state.articles.reduce((s,a)=>s+(+a.stock||0),0);
+  kpiEK.textContent=money(state.articles.reduce((s,a)=>s+(+a.stock||0)*(+a.ek||0),0));
+  kpiVK.textContent=money(state.articles.reduce((s,a)=>s+(+a.stock||0)*(+a.vk||0),0));
+  const lows=state.articles.filter(a=>(+a.min||0)>0 && (+a.stock||0)<=+a.min);
+  lowStockList.innerHTML=lows.map(a=>`<span class="badge low">${a.name}: ${a.stock}/${a.min}</span>`).join('')||'<small class="muted">Alles im grünen Bereich.</small>';
+  recentHistory.innerHTML=state.history.slice(0,8).map(h=>`<div><b>${h.type}</b> ${h.article} (${h.qty})<br><small>${todayText(h.date)} ${h.customer||''}</small></div><hr>`).join('')||'<small class="muted">Noch keine Bewegungen.</small>';
+}
+function renderArticles(){
+  const q=(articleSearch?.value||'').toLowerCase();
+  const rows=state.articles.filter(a=>JSON.stringify(a).toLowerCase().includes(q)).map(a=>`<tr>
+    <td><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''}</small></td>
+    <td>${a.category||'-'}</td><td>${money(a.ek)}</td><td>${money(a.vk)}</td>
+    <td><span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></td>
+    <td>${a.dimensions||'-'}</td><td>${a.note||'-'}</td>
+    <td><button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}')">Löschen</button></td>
+  </tr>`).join('');
+  articleTable.innerHTML=`<tr><th>Artikel</th><th>Kategorie</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Notiz</th><th></th></tr>${rows}`;
+}
+function renderIssues(){
+  const q=(issueSearch?.value||'').toLowerCase();
+  const items=state.issues.filter(i=>JSON.stringify(i).toLowerCase().includes(q)).map(i=>`
+    <div class="card" style="margin-bottom:10px;background:#131824">
+      <div class="row" style="justify-content:space-between">
+        <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_code||'-'}</small></div>
+        <select style="width:auto" onchange="updateIssueStatus('${i.id}',this.value)">
+          ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}</p>
+      <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
+      ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">Tracking öffnen</a>`:''}
+    </div>`).join('');
+  issueList.innerHTML=items||'<small class="muted">Noch keine Ausgaben.</small>';
+}
+function renderHistory(){
+  const q=(historySearch?.value||'').toLowerCase();
+  const rows=state.history.filter(h=>JSON.stringify(h).toLowerCase().includes(q)).map(h=>`<tr>
+    <td>${todayText(h.date)}</td><td>${h.type}</td><td>${h.article}</td><td>${h.qty}</td><td>${h.user||'-'}</td>
+    <td>${h.customer||'-'}</td><td>${h.project||'-'}</td><td>${h.serials||'-'}</td><td>${h.tracking_code||'-'}</td><td>${h.comment||'-'}</td>
+  </tr>`).join('');
+  historyTable.innerHTML=`<tr><th>Datum</th><th>Aktion</th><th>Artikel</th><th>Menge</th><th>Benutzer</th><th>Kunde</th><th>Projekt</th><th>Seriennummer</th><th>Tracking</th><th>Kommentar</th></tr>${rows}`;
+}
+function exportCSV(type){
+  const arr=type==='articles'?state.articles:state.history;
+  if(!arr.length){toast('Keine Daten');return}
+  const keys=[...new Set(arr.flatMap(o=>Object.keys(o)))];
+  const csv=[keys.join(';'),...arr.map(o=>keys.map(k=>`"${String(o[k]??'').replaceAll('"','""')}"`).join(';'))].join('\n');
+  download(type+'.csv',csv,'text/csv')
+}
+function exportAll(){download('lager-backup.json',JSON.stringify(state,null,2),'application/json')}
+function download(name,content,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click()}
+
+loadLocal();initSupabase();render();
+</script>
+</body>
+</html>
