@@ -369,7 +369,7 @@ function issueFromDb(i, positions){
   return {
     id:i.id,number:i.number,date:i.created_at,customer:i.customer||'',project:i.project||'',
     destination:i.destination||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
-    tracking_code:i.tracking_code||'',status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',
+    tracking_code:i.tracking_code||'',tracking_label:getTrackingInfo(i.tracking_link||i.tracking_code||'').label,status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',
     positions:(positions||[]).filter(p=>p.issue_id===i.id).map(p=>({
       article_id:p.article_id,article:p.article_name||articleName(p.article_id),qty:+p.qty||0,serials:p.serials||''
     }))
@@ -487,19 +487,72 @@ async function bookIncoming(){
   inQty.value=1;inComment.value='';toast('Wareneingang gebucht')
 }
 
-function extractTrackingCode(url){
-  const raw=(url||'').trim(); if(!raw)return '';
+function getTrackingInfo(url){
+  const raw=(url||'').trim();
+  if(!raw)return {carrier:'',code:'',label:'-'};
   try{
     const u=new URL(raw);
-    const keys=['trackingNumber','trackingnumber','tracking-id','tracknum','piececode','id','q','nums','AWB','awb'];
-    for(const k of keys){const v=u.searchParams.get(k); if(v&&/[A-Z0-9]{6,}/i.test(v))return v.replace(/[^A-Z0-9-]/gi,'')}
+    const host=u.hostname.toLowerCase();
+
+    const carrier =
+      host.includes('fedex') ? 'FedEx' :
+      host.includes('dhl') ? 'DHL' :
+      host.includes('ups') ? 'UPS' :
+      host.includes('dpd') ? 'DPD' :
+      host.includes('gls') ? 'GLS' :
+      host.includes('tnt') ? 'TNT' :
+      host.includes('deutschepost') ? 'Deutsche Post' :
+      '';
+
+    const keys=[
+      'tracknumbers',      // FedEx
+      'trackingNumber',
+      'trackingnumber',
+      'tracking-id',
+      'tracknum',
+      'piececode',         // DHL
+      'shipment',
+      'shipmentNumber',
+      'InquiryNumber1',    // UPS
+      'parcelNumber',      // DPD
+      'match',             // GLS
+      'id',
+      'q',
+      'nums',
+      'AWB',
+      'awb'
+    ];
+
+    for(const k of keys){
+      const v=u.searchParams.get(k);
+      if(v && /[A-Z0-9]{6,}/i.test(v)){
+        const code=v.replace(/[^A-Z0-9-]/gi,'');
+        return {carrier,code,label:(carrier?carrier+' ':'')+code};
+      }
+    }
+
     const parts=u.pathname.split('/').filter(Boolean).reverse();
-    for(const p of parts){const clean=decodeURIComponent(p).replace(/[^A-Z0-9-]/gi,''); if(/[A-Z0-9]{8,}/i.test(clean))return clean}
+    for(const p of parts){
+      const clean=decodeURIComponent(p).replace(/[^A-Z0-9-]/gi,'');
+      if(/[A-Z0-9]{8,}/i.test(clean)){
+        return {carrier,code:clean,label:(carrier?carrier+' ':'')+clean};
+      }
+    }
   }catch(e){}
+
   const m=raw.match(/[A-Z0-9][A-Z0-9-]{7,}[A-Z0-9]/i);
-  return m?m[0]:'';
+  const code=m?m[0]:'';
+  return {carrier:'',code,label:code||'-'};
 }
-function showTrackingPreview(){trackingPreview.textContent=extractTrackingCode(iTracking.value)||'-'}
+
+function extractTrackingCode(url){
+  return getTrackingInfo(url).code;
+}
+
+function showTrackingPreview(){
+  const info=getTrackingInfo(iTracking.value);
+  trackingPreview.textContent=info.label||'-';
+}
 function addPosition(){
   const a=getArticle(posArticle.value), qty=+posQty.value||0; if(!a||qty<=0){toast('Position prüfen');return}
   if(qty>(+a.stock||0)){toast('Nicht genug Bestand');return}
@@ -514,7 +567,7 @@ async function saveIssue(){
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
-  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),status:iStatus.value,user:iUser.value.trim()||user?.user_metadata?.name||user?.email||'Unbekannt',positions:[...positions]};
+  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:iUser.value.trim()||user?.user_metadata?.name||user?.email||'Unbekannt',positions:[...positions]};
   if(sb){
     const {error:eIssue}=await sb.from('lager_issues').insert({
       id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
@@ -644,7 +697,7 @@ function renderIssues(){
   const items=state.issues.filter(i=>JSON.stringify(i).toLowerCase().includes(q)).map(i=>`
     <div class="card" style="margin-bottom:10px;background:#131824">
       <div class="row" style="justify-content:space-between">
-        <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_code||'-'}</small></div>
+        <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">${i.tracking_label||i.tracking_code||'Tracking öffnen'}</a>`:(i.tracking_label||i.tracking_code||'-')}</small></div>
         <select style="width:auto" ${i.status==='Storniert'?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value)">
           ${['Vorbereitung','Verpackt','Versendet','Zugestellt','Storniert'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
@@ -652,7 +705,6 @@ function renderIssues(){
       <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
-        ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">Tracking öffnen</a>`:''}
         ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}')">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
       </div>
     </div>`).join('');
