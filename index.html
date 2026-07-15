@@ -268,6 +268,7 @@ window.addEventListener('error', function(e){
           <div class="col-6"><label>Projekt / Ticket</label><input id="iProject"></div>
           <div class="col-6"><label>Zielort</label><input id="iDestination"></div><div class="col-6"><label>Adresse</label><input id="iAddress" placeholder="Straße, PLZ Ort"></div>
           <div class="col-6"><label>Status</label><select id="iStatus"><option>Vorbereitung</option><option>Verpackt</option><option>Versendet</option><option>Zugestellt</option></select></div>
+          <div class="col-6"><label>Angebotsnummer</label><input id="iOffer" placeholder="z. B. AN-2026-014"></div>
           <div class="col-12"><label>Tracking-Link</label><input id="iTracking" oninput="showTrackingPreview()" placeholder="DHL/FedEx/UPS Link"></div>
           <div class="col-12"><small>Anzeige: <b id="trackingPreview">-</b></small></div>
           <div class="col-12"><label>Verwendungszweck</label><textarea id="iPurpose"></textarea></div>
@@ -640,7 +641,7 @@ function articleFromDb(a){
 function issueFromDb(i, positions){
   return {
     id:i.id,number:i.number,date:i.created_at,customer:i.customer||'',project:i.project||'',
-    destination:i.destination||'',address:i.address||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
+    destination:i.destination||'',address:i.address||'',offer:i.offer||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
     tracking_code:i.tracking_code||'',tracking_label:getTrackingInfo(i.tracking_link||i.tracking_code||'').label,status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',total_weight:+i.total_weight||0,
     positions:(positions||[]).filter(p=>p.issue_id===i.id).map(p=>({
       article_id:p.article_id,article:p.article_name||articleName(p.article_id),qty:+p.qty||0,serials:p.serials||''
@@ -705,7 +706,7 @@ async function callCreateIssueRpc(issue){
   return await sb.rpc('lager_create_issue',{
     p_issue:{
       id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
-      address:issue.address,purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,
+      address:issue.address,offer:issue.offer,purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,
       status:issue.status,created_by_name:issue.user,total_weight:issue.total_weight
     },
     p_positions:issue.positions.map(p=>({article_id:p.article_id,article_name:p.article,qty:p.qty,serials:p.serials||''}))
@@ -715,15 +716,23 @@ async function callCancelIssueRpc(issueId,userName){
   return await sb.rpc('lager_cancel_issue',{p_issue_id:issueId,p_user_name:userName});
 }
 
+// Interne Benachrichtigung (Buchhaltung/Onboarding) bei jeder neuen Ausgabe.
+// Bewusst "fire and forget": ein E-Mail-Fehler soll die gespeicherte Ausgabe nicht in Frage stellen.
+function notifyIssueCreated(issue){
+  sb.functions.invoke('notify-issue',{body:{issue}}).then(({error})=>{
+    if(error)console.error('Ausgabe-Benachrichtigung fehlgeschlagen:',error);
+  }).catch(e=>console.error('Ausgabe-Benachrichtigung fehlgeschlagen:',e));
+}
+
 // Fallback ohne DB-Funktion: fügt die Ausgabe ein und probiert optionale Spalten (address, total_weight)
 // einzeln raus, falls die zugehörige SQL-Migration in der DB noch nicht gelaufen ist.
 async function insertIssueRow(issue){
   const payload={
     id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
-    address:issue.address,purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,
+    address:issue.address,offer:issue.offer,purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,
     status:issue.status,created_by_name:issue.user,total_weight:issue.total_weight
   };
-  const optionalCols=['address','total_weight'];
+  const optionalCols=['address','offer','total_weight'];
   const missingCols=[];
   for(let attempt=0;attempt<optionalCols.length+1;attempt++){
     const {error}=await sb.from('lager_issues').insert(payload);
@@ -975,7 +984,7 @@ async function saveIssue(btn){
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
-  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
+  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),offer:(document.getElementById('iOffer')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
   setLoading(btn,true);
   try{
   if(sb){
@@ -1019,7 +1028,8 @@ async function saveIssue(btn){
     });
     state.issues.unshift(issue);persist();
   }
-  positions=[];['iCustomer','iProject','iDestination','iAddress','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
+  if(sb) notifyIssueCreated(issue);
+  positions=[];['iCustomer','iProject','iDestination','iAddress','iOffer','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
   } finally { setLoading(btn,false); }
 }
 
@@ -1140,7 +1150,7 @@ function renderIssues(){
           ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
-      <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small><br><b>Gesamtgewicht:</b> ${formatWeight(i.total_weight || calculatePositionsWeight(i.positions))}</p>
+      <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small><br>${i.offer?`<small>Angebot: ${i.offer}</small><br>`:''}<b>Gesamtgewicht:</b> ${formatWeight(i.total_weight || calculatePositionsWeight(i.positions))}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
         ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}',this)">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
