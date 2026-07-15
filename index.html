@@ -206,6 +206,7 @@ window.addEventListener('error', function(e){
         <div class="col-4"><label>Bestand</label><input id="aStock" type="number" step="1" value="0"></div>
         <div class="col-6"><label>Mindestbestand</label><input id="aMin" type="number" step="1" value="0"></div>
         <div class="col-6"><label>Maße</label><input id="aDimensions" placeholder="L x B x H"></div>
+        <div class="col-6"><label>Gewicht pro Stück (kg)</label><input id="aWeight" type="number" min="0" step="0.001" placeholder="z. B. 12,5"></div>
         <div class="col-12"><label>Notiz / Lieferant / sonstiges</label><textarea id="aNote"></textarea></div>
       </div>
       <div class="row" style="margin-top:10px">
@@ -277,6 +278,7 @@ window.addEventListener('error', function(e){
         </div>
         <button class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
         <div id="positionsList"></div>
+        <div class="position-box" style="margin-top:12px"><b>Gesamtgewicht der Ausgabe:</b> <span id="issueTotalWeight">0 kg</span></div>
         <button style="margin-top:12px" onclick="saveIssue()">Ausgabe speichern</button>
       </div>
 
@@ -365,7 +367,7 @@ function renderScanResult(a,raw=''){
       <p><span class="badge">${a.category||'Ohne Kategorie'}</span> <span class="badge">${storageLabel(a)}</span></p>
       <p><b>Barcode:</b> ${a.barcode||'-'}<br>
       <b>Marke / Modell:</b> ${a.brand||'-'} ${a.model||''}<br>
-      <b>Bestand:</b> <span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></p>
+      <b>Bestand:</b> <span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span><br><b>Gewicht:</b> ${formatWeight(a.weight)}</p>
       <div class="row">
         <button onclick="scannerStockChange(1)">+1 einlagern</button>
         <button class="warn" onclick="scannerStockChange(-1)">−1 auslagern</button>
@@ -592,7 +594,7 @@ function cleanArticleForDb(a){
   return {
     id:a.id,name:a.name||'',brand:a.brand||'',model:a.model||'',barcode:a.barcode||'',category:a.category||'',
     ek:+a.ek||0,vk:+a.vk||0,stock:+a.stock||0,min_stock:+a.min||0,
-    dimensions:a.dimensions||'',note:a.note||'',storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',updated_at:now()
+    dimensions:a.dimensions||'',weight:+a.weight||0,note:a.note||'',storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',updated_at:now()
   };
 }
 
@@ -600,7 +602,7 @@ function articleFromDb(a){
   return {
     id:a.id,name:a.name,brand:a.brand,model:a.model,barcode:a.barcode||loadBarcodeMap()[a.id]||'',category:a.category,
     ek:+a.ek||0,vk:+a.vk||0,stock:+a.stock||0,min:+a.min_stock||0,
-    dimensions:a.dimensions,note:a.note,storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',updated_at:a.updated_at
+    dimensions:a.dimensions,weight:+a.weight||0,note:a.note,storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',updated_at:a.updated_at
   };
 }
 
@@ -608,7 +610,7 @@ function issueFromDb(i, positions){
   return {
     id:i.id,number:i.number,date:i.created_at,customer:i.customer||'',project:i.project||'',
     destination:i.destination||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
-    tracking_code:i.tracking_code||'',tracking_label:getTrackingInfo(i.tracking_link||i.tracking_code||'').label,status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',
+    tracking_code:i.tracking_code||'',tracking_label:getTrackingInfo(i.tracking_link||i.tracking_code||'').label,status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',total_weight:+i.total_weight||0,
     positions:(positions||[]).filter(p=>p.issue_id===i.id).map(p=>({
       article_id:p.article_id,article:p.article_name||articleName(p.article_id),qty:+p.qty||0,serials:p.serials||''
     }))
@@ -671,6 +673,16 @@ function subscribeRealtime(){
 function showTab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');render();if(id==='scanner')setTimeout(focusScanner,50);else stopCameraScanner()}
 function getArticle(id){return state.articles.find(a=>a.id===id)}
 function articleName(id){const a=getArticle(id);return a?`${a.name} ${a.brand? '('+a.brand+')':''}`:'Gelöschter Artikel'}
+function formatWeight(n){
+  return (Number(n)||0).toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:3})+' kg';
+}
+function calculatePositionsWeight(posList){
+  return (posList||[]).reduce((sum,p)=>{
+    const a=getArticle(p.article_id);
+    return sum + ((+a?.weight||0) * (+p.qty||0));
+  },0);
+}
+
 
 function openArticleModal(){resetArticleForm();articleModal.classList.remove('hidden')}
 function calcVK(){
@@ -698,7 +710,7 @@ function storageLabel(a){
 }
 function closeArticleModal(){articleModal.classList.add('hidden')}
 async function saveArticle(){
-  const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.3).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),note:aNote.value.trim(),updated_at:now()};
+  const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.3).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),updated_at:now()};
   if(obj.barcode){
     const duplicate=state.articles.find(a=>a.id!==obj.id && normalizeBarcode(a.barcode).toLowerCase()===obj.barcode.toLowerCase());
     if(duplicate){toast('Barcode ist bereits bei „'+duplicate.name+'“ hinterlegt');return}
@@ -723,7 +735,7 @@ async function saveArticle(){
   }
   resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
 }
-function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aNote.value=a.note||'';articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
+function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
 async function deleteArticle(id){
   if(!confirm('Artikel wirklich löschen?'))return;
   if(sb){
@@ -734,7 +746,7 @@ async function deleteArticle(id){
     state.articles=state.articles.filter(a=>a.id!==id);persist();
   }
 }
-function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aNote','aShelf','aShelfCompartment'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;articleFormTitle.textContent='Artikel anlegen'}
+function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;articleFormTitle.textContent='Artikel anlegen'}
 
 async function bookIncoming(){
   const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
@@ -831,18 +843,33 @@ function addPosition(){
 }
 function removePosition(i){positions.splice(i,1);renderPositions()}
 function renderPositions(){
-  positionsList.innerHTML=positions.map((p,i)=>`<div class="position-box"><b>${p.qty} × ${p.article}</b><br><small>Seriennummer: ${p.serials||'-'}</small><br><button class="danger" onclick="removePosition(${i})">Entfernen</button></div>`).join('')||'<small class="muted">Noch keine Positionen.</small>'
+  positionsList.innerHTML=positions.map((p,i)=>{
+    const a=getArticle(p.article_id);
+    const unitWeight=+a?.weight||0;
+    const totalWeight=unitWeight*(+p.qty||0);
+    return `<div class="position-box"><b>${p.qty} × ${p.article}</b><br><small>Seriennummer: ${p.serials||'-'} · Gewicht: ${formatWeight(unitWeight)} pro Stück · Position: ${formatWeight(totalWeight)}</small><br><button class="danger" onclick="removePosition(${i})">Entfernen</button></div>`;
+  }).join('')||'<small class="muted">Noch keine Positionen.</small>';
+  const total=document.getElementById('issueTotalWeight');
+  if(total)total.textContent=formatWeight(calculatePositionsWeight(positions));
 }
 async function saveIssue(){
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
-  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions]};
+  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
   if(sb){
-    const {error:eIssue}=await sb.from('lager_issues').insert({
+    let {error:eIssue}=await sb.from('lager_issues').insert({
       id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
-      purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,status:issue.status,created_by_name:issue.user
+      purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,status:issue.status,created_by_name:issue.user,total_weight:issue.total_weight
     });
+    if(eIssue && String(eIssue.message||'').toLowerCase().includes('total_weight')){
+      const retry=await sb.from('lager_issues').insert({
+        id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
+        purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,status:issue.status,created_by_name:issue.user
+      });
+      eIssue=retry.error;
+      if(!eIssue)toast('Ausgabe gespeichert. Für Cloud-Gewichte bitte die SQL-Migration ausführen.');
+    }
     if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
     const dbPositions=issue.positions.map(p=>({issue_id:issue.id,article_id:p.article_id,article_name:p.article,qty:p.qty,serials:p.serials||''}));
     const {error:ePos}=await sb.from('lager_issue_positions').insert(dbPositions);
@@ -957,10 +984,10 @@ function renderArticles(){
     <td><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''}</small></td>
     <td>${a.category||'-'}</td><td>${a.barcode||'-'}</td><td>${storageLabel(a)}</td><td>${money(a.ek)}</td><td>${money(a.vk)}</td>
     <td><span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></td>
-    <td>${a.dimensions||'-'}</td><td>${a.note||'-'}</td>
+    <td>${a.dimensions||'-'}</td><td>${(+a.weight||0).toLocaleString('de-DE',{maximumFractionDigits:3})} kg</td><td>${a.note||'-'}</td>
     <td><button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}')">Löschen</button></td>
   </tr>`).join('');
-  articleTable.innerHTML=`<tr><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Notiz</th><th></th></tr>${rows}`;
+  articleTable.innerHTML=`<tr><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Gewicht</th><th>Notiz</th><th></th></tr>${rows}`;
 }
 function renderIssues(){
   const q=(issueSearch?.value||'').toLowerCase();
@@ -972,7 +999,7 @@ function renderIssues(){
           ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
-      <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small></p>
+      <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small><br><b>Gesamtgewicht:</b> ${formatWeight(i.total_weight || calculatePositionsWeight(i.positions))}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
         ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}')">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
