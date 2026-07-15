@@ -52,6 +52,9 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 .search{margin:0 0 12px}
 .position-box{border:1px dashed var(--line);border-radius:12px;padding:10px;margin:8px 0;background:#111522}
 .toast{position:fixed;right:18px;bottom:18px;background:#192236;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px rgba(0,0,0,.35);z-index:9}
+.spinner{display:inline-block;width:11px;height:11px;margin-right:7px;vertical-align:-1px;border-radius:50%;border:2px solid rgba(0,0,0,.25);border-top-color:currentColor;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+select:disabled{opacity:.6;cursor:not-allowed}
 </style>
 <script>
 window.addEventListener('error', function(e){
@@ -76,10 +79,10 @@ window.addEventListener('error', function(e){
       <label>Passwort</label>
       <input id="authPassword" type="password" autocomplete="current-password" placeholder="Passwort">
       <div class="row" style="margin-top:12px">
-        <button onclick="login()">Login</button>
+        <button onclick="login(this)">Login</button>
         <button class="secondary" onclick="showRegister()">Registrieren</button>
       </div>
-      <button class="secondary" style="margin-top:10px;width:100%" onclick="resetPassword()">Passwort vergessen</button>
+      <button class="secondary" style="margin-top:10px;width:100%" onclick="resetPassword(this)">Passwort vergessen</button>
     </div>
 
     <div id="registerMode" class="hidden">
@@ -90,7 +93,7 @@ window.addEventListener('error', function(e){
       <label>Passwort</label>
       <input id="regPassword" type="password" autocomplete="new-password" placeholder="Mindestens 6 Zeichen">
       <div class="row" style="margin-top:12px">
-        <button onclick="register()">Account erstellen</button>
+        <button onclick="register(this)">Account erstellen</button>
         <button class="secondary" onclick="showLogin()">Zurück zum Login</button>
       </div>
     </div>
@@ -112,7 +115,7 @@ window.addEventListener('error', function(e){
     <span id="currentUserBadge" class="badge">Nicht angemeldet</span>
     <span id="syncState" class="badge">Lokalmodus</span>
     <button class="secondary" onclick="exportAll()">Backup JSON</button>
-    <button class="danger" onclick="logout()">Logout</button>
+    <button class="danger" onclick="logout(this)">Logout</button>
   </div>
 </header>
 
@@ -210,7 +213,7 @@ window.addEventListener('error', function(e){
         <div class="col-12"><label>Notiz / Lieferant / sonstiges</label><textarea id="aNote"></textarea></div>
       </div>
       <div class="row" style="margin-top:10px">
-        <button onclick="saveArticle()">Speichern</button>
+        <button onclick="saveArticle(this)">Speichern</button>
         <button class="secondary" onclick="resetArticleForm()">Leeren</button>
       </div>
     </div>
@@ -252,7 +255,7 @@ window.addEventListener('error', function(e){
         <div class="col-2"><label>Menge</label><input id="inQty" type="number" value="1"></div>
         <div class="col-4"><label>Kommentar</label><input id="inComment" placeholder="Wareneingang, Rückläufer ..."></div>
       </div>
-      <button style="margin-top:10px" onclick="bookIncoming()">Einlagern</button>
+      <button style="margin-top:10px" onclick="bookIncoming(this)">Einlagern</button>
     </div>
   </section>
 
@@ -279,7 +282,7 @@ window.addEventListener('error', function(e){
         <button class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
         <div id="positionsList"></div>
         <div class="position-box" style="margin-top:12px"><b>Gesamtgewicht der Ausgabe:</b> <span id="issueTotalWeight">0 kg</span></div>
-        <button style="margin-top:12px" onclick="saveIssue()">Ausgabe speichern</button>
+        <button style="margin-top:12px" onclick="saveIssue(this)">Ausgabe speichern</button>
       </div>
 
       <div class="card col-7">
@@ -369,8 +372,8 @@ function renderScanResult(a,raw=''){
       <b>Marke / Modell:</b> ${a.brand||'-'} ${a.model||''}<br>
       <b>Bestand:</b> <span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span><br><b>Gewicht:</b> ${formatWeight(a.weight)}</p>
       <div class="row">
-        <button onclick="scannerStockChange(1)">+1 einlagern</button>
-        <button class="warn" onclick="scannerStockChange(-1)">−1 auslagern</button>
+        <button onclick="scannerStockChange(1,this)">+1 einlagern</button>
+        <button class="warn" onclick="scannerStockChange(-1,this)">−1 auslagern</button>
         <button class="blue" onclick="addScannedToIssue()">Zur Ausgabe hinzufügen</button>
         <button class="secondary" onclick="editArticle('${a.id}')">Artikel bearbeiten</button>
       </div>
@@ -381,7 +384,7 @@ function openNewArticleFromScan(code){
   aBarcode.value=code||'';
   aName.focus();
 }
-async function scannerStockChange(delta){
+async function scannerStockChange(delta,btn){
   const a=getArticle(scannedArticleId);
   if(!a){toast('Kein Artikel ausgewählt');return}
   if(delta<0 && (+a.stock||0)<=0){toast('Kein Bestand verfügbar');return}
@@ -389,25 +392,27 @@ async function scannerStockChange(delta){
   const type=delta>0?'Scanner-Eingang':'Scanner-Ausgabe';
   const qty=delta>0?1:-1;
   const userName=currentUserName();
-
-  if(sb){
-    const res=await casUpdateStock(a,delta);
-    if(res.failure){toast(res.failure);await syncDown();return}
-    const {error:e2}=await sb.from('lager_history').insert({
-      type,article_id:a.id,article_name:a.name,qty,user_name:userName,
-      comment:'Barcode-Scan: '+(a.barcode||''),customer:'',project:'',tracking_code:'',serials:a.barcode||''
-    });
-    if(e2){toast('Supabase Fehler: '+e2.message);return}
-    await syncDown();
-  }else{
-    a.stock=newStock;
-    state.history.unshift({id:uid(),type,date:now(),article_id:a.id,article:a.name,qty,user:userName,comment:'Barcode-Scan: '+(a.barcode||''),customer:'',project:'',tracking_code:'',serials:a.barcode||''});
-    persist();
-  }
-  scannedArticleId=a.id;
-  renderScanResult(getArticle(a.id),a.barcode||'');
-  toast(delta>0?'1 Stück eingelagert':'1 Stück ausgelagert');
-  focusScanner();
+  setLoading(btn,true);
+  try{
+    if(sb){
+      const res=await casUpdateStock(a,delta);
+      if(res.failure){toast(res.failure);await syncDown();return}
+      const {error:e2}=await sb.from('lager_history').insert({
+        type,article_id:a.id,article_name:a.name,qty,user_name:userName,
+        comment:'Barcode-Scan: '+(a.barcode||''),customer:'',project:'',tracking_code:'',serials:a.barcode||''
+      });
+      if(e2){toast('Supabase Fehler: '+e2.message);return}
+      await syncDown();
+    }else{
+      a.stock=newStock;
+      state.history.unshift({id:uid(),type,date:now(),article_id:a.id,article:a.name,qty,user:userName,comment:'Barcode-Scan: '+(a.barcode||''),customer:'',project:'',tracking_code:'',serials:a.barcode||''});
+      persist();
+    }
+    scannedArticleId=a.id;
+    renderScanResult(getArticle(a.id),a.barcode||'');
+    toast(delta>0?'1 Stück eingelagert':'1 Stück ausgelagert');
+    focusScanner();
+  } finally { setLoading(btn,false); }
 }
 function addScannedToIssue(){
   const a=getArticle(scannedArticleId);
@@ -473,6 +478,20 @@ function money(n){return (Number(n)||0).toLocaleString('de-DE',{style:'currency'
 function now(){return new Date().toISOString()}
 function todayText(d){return new Date(d).toLocaleString('de-DE')}
 function toast(t){const el=document.createElement('div');el.className='toast';el.textContent=t;document.body.appendChild(el);setTimeout(()=>el.remove(),2600)}
+// Sperrt einen Button/Select während einer laufenden async-Aktion und zeigt einen Spinner,
+// damit Doppelklicks nicht zu doppelten Buchungen führen.
+function setLoading(el,loading){
+  if(!el)return;
+  if(loading){
+    if(el.dataset.origHtml===undefined)el.dataset.origHtml=el.tagName==='SELECT'?'':el.innerHTML;
+    el.disabled=true;
+    if(el.tagName!=='SELECT')el.innerHTML='<span class="spinner"></span>'+el.dataset.origHtml;
+  } else {
+    el.disabled=false;
+    if(el.tagName!=='SELECT' && el.dataset.origHtml!==undefined)el.innerHTML=el.dataset.origHtml;
+    delete el.dataset.origHtml;
+  }
+}
 function currentUserName(){return user?.user_metadata?.name || user?.email || 'Unbekannt'}
 
 function loadLocal(){state=JSON.parse(localStorage.getItem(LS_KEY)||'{"articles":[],"issues":[],"history":[]}')}
@@ -547,47 +566,59 @@ function initSupabase(){
   }
 }
 
-async function login(){
+async function login(btn){
   if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
-  const {data,error}=await sb.auth.signInWithPassword({email:authEmail.value.trim(),password:authPassword.value});
-  if(error){toast(error.message);return;}
-  user=data.user;
-  showApp();
-  toast('Eingeloggt');
-  await syncDown();
-  subscribeRealtime();
+  setLoading(btn,true);
+  try{
+    const {data,error}=await sb.auth.signInWithPassword({email:authEmail.value.trim(),password:authPassword.value});
+    if(error){toast(error.message);return;}
+    user=data.user;
+    showApp();
+    toast('Eingeloggt');
+    await syncDown();
+    subscribeRealtime();
+  } finally { setLoading(btn,false); }
 }
 
-async function register(){
+async function register(btn){
   if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
   const name=authName.value.trim();
   const email=regEmail.value.trim();
   const password=regPassword.value;
   if(!name || !email || !password){toast('Name, E-Mail und Passwort ausfüllen.');return;}
-  const {data,error}=await sb.auth.signUp({email,password,options:{data:{name}}});
-  if(error){toast(error.message);return;}
-  if(data?.user){
-    await sb.from('lager_profiles').upsert({id:data.user.id,email,name});
-  }
-  toast('Registriert. Falls E-Mail-Bestätigung aktiv ist, bitte bestätigen und danach einloggen.');
-  authEmail.value=email;
-  showLogin();
+  setLoading(btn,true);
+  try{
+    const {data,error}=await sb.auth.signUp({email,password,options:{data:{name}}});
+    if(error){toast(error.message);return;}
+    if(data?.user){
+      await sb.from('lager_profiles').upsert({id:data.user.id,email,name});
+    }
+    toast('Registriert. Falls E-Mail-Bestätigung aktiv ist, bitte bestätigen und danach einloggen.');
+    authEmail.value=email;
+    showLogin();
+  } finally { setLoading(btn,false); }
 }
 
-async function resetPassword(){
+async function resetPassword(btn){
   if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
   const email=authEmail.value.trim();
   if(!email){toast('Bitte E-Mail eintragen.');return;}
-  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.href});
-  if(error)toast(error.message);
-  else toast('Reset-Link wurde verschickt.');
+  setLoading(btn,true);
+  try{
+    const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.href});
+    if(error)toast(error.message);
+    else toast('Reset-Link wurde verschickt.');
+  } finally { setLoading(btn,false); }
 }
 
-async function logout(){
-  if(sb)await sb.auth.signOut();
-  user=null;
-  showLoginScreen();
-  toast('Ausgeloggt');
+async function logout(btn){
+  setLoading(btn,true);
+  try{
+    if(sb)await sb.auth.signOut();
+    user=null;
+    showLoginScreen();
+    toast('Ausgeloggt');
+  } finally { setLoading(btn,false); }
 }
 
 function cleanArticleForDb(a){
@@ -789,63 +820,72 @@ function storageLabel(a){
   return a.storage_location;
 }
 function closeArticleModal(){articleModal.classList.add('hidden')}
-async function saveArticle(){
+async function saveArticle(btn){
   const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.3).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),updated_at:now()};
   if(obj.barcode){
     const duplicate=state.articles.find(a=>a.id!==obj.id && normalizeBarcode(a.barcode).toLowerCase()===obj.barcode.toLowerCase());
     if(duplicate){toast('Barcode ist bereits bei „'+duplicate.name+'“ hinterlegt');return}
   }
   if(!obj.name){toast('Name fehlt');return}
-  if(sb){
-    let {error}=await sb.from('lager_articles').upsert(cleanArticleForDb(obj));
-    if(error && String(error.message||'').toLowerCase().includes('barcode')){
-      const fallback=cleanArticleForDb(obj); delete fallback.barcode;
-      const retry=await sb.from('lager_articles').upsert(fallback);
-      error=retry.error;
-      if(!error)toast('Artikel gespeichert. Für Cloud-Barcodes bitte die SQL-Migration ausführen.');
+  setLoading(btn,true);
+  try{
+    if(sb){
+      let {error}=await sb.from('lager_articles').upsert(cleanArticleForDb(obj));
+      if(error && String(error.message||'').toLowerCase().includes('barcode')){
+        const fallback=cleanArticleForDb(obj); delete fallback.barcode;
+        const retry=await sb.from('lager_articles').upsert(fallback);
+        error=retry.error;
+        if(!error)toast('Artikel gespeichert. Für Cloud-Barcodes bitte die SQL-Migration ausführen.');
+      }
+      if(error){toast('Supabase Fehler: '+error.message);return}
+      const map=loadBarcodeMap(); if(obj.barcode)map[obj.id]=obj.barcode; else delete map[obj.id];
+      localStorage.setItem(BARCODE_KEY,JSON.stringify(map));
+      await syncDown();
+    } else {
+      const i=state.articles.findIndex(a=>a.id===obj.id);
+      if(i>=0)state.articles[i]={...state.articles[i],...obj}; else state.articles.push(obj);
+      persist();
     }
-    if(error){toast('Supabase Fehler: '+error.message);return}
-    const map=loadBarcodeMap(); if(obj.barcode)map[obj.id]=obj.barcode; else delete map[obj.id];
-    localStorage.setItem(BARCODE_KEY,JSON.stringify(map));
-    await syncDown();
-  } else {
-    const i=state.articles.findIndex(a=>a.id===obj.id);
-    if(i>=0)state.articles[i]={...state.articles[i],...obj}; else state.articles.push(obj);
-    persist();
-  }
-  resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
+    resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
+  } finally { setLoading(btn,false); }
 }
 function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
-async function deleteArticle(id){
+async function deleteArticle(id,btn){
   if(!confirm('Artikel wirklich löschen?'))return;
-  if(sb){
-    const {error}=await sb.from('lager_articles').delete().eq('id',id);
-    if(error){toast('Supabase Fehler: '+error.message);return}
-    await syncDown();
-  } else {
-    state.articles=state.articles.filter(a=>a.id!==id);persist();
-  }
+  setLoading(btn,true);
+  try{
+    if(sb){
+      const {error}=await sb.from('lager_articles').delete().eq('id',id);
+      if(error){toast('Supabase Fehler: '+error.message);return}
+      await syncDown();
+    } else {
+      state.articles=state.articles.filter(a=>a.id!==id);persist();
+    }
+  } finally { setLoading(btn,false); }
 }
 function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;articleFormTitle.textContent='Artikel anlegen'}
 
-async function bookIncoming(){
+async function bookIncoming(btn){
   const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
   const userName=currentUserName();
-  if(sb){
-    const res=await casUpdateStock(a,qty);
-    if(res.failure){toast(res.failure);await syncDown();return}
-    const {error:e2}=await sb.from('lager_history').insert({
-      type:'Wareneingang',article_id:a.id,article_name:a.name,qty:qty,user_name:userName,
-      comment:inComment.value||'',customer:'',project:'',tracking_code:'',serials:''
-    });
-    if(e2){toast('Supabase Fehler: '+e2.message);return}
-    await syncDown();
-  } else {
-    a.stock=(+a.stock||0)+qty;
-    state.history.unshift({id:uid(),type:'Wareneingang',date:now(),article_id:a.id,article:a.name,qty,user:userName,comment:inComment.value||'',customer:'',project:'',tracking_code:'',serials:''});
-    persist();
-  }
-  inQty.value=1;inComment.value='';toast('Wareneingang gebucht')
+  setLoading(btn,true);
+  try{
+    if(sb){
+      const res=await casUpdateStock(a,qty);
+      if(res.failure){toast(res.failure);await syncDown();return}
+      const {error:e2}=await sb.from('lager_history').insert({
+        type:'Wareneingang',article_id:a.id,article_name:a.name,qty:qty,user_name:userName,
+        comment:inComment.value||'',customer:'',project:'',tracking_code:'',serials:''
+      });
+      if(e2){toast('Supabase Fehler: '+e2.message);return}
+      await syncDown();
+    } else {
+      a.stock=(+a.stock||0)+qty;
+      state.history.unshift({id:uid(),type:'Wareneingang',date:now(),article_id:a.id,article:a.name,qty,user:userName,comment:inComment.value||'',customer:'',project:'',tracking_code:'',serials:''});
+      persist();
+    }
+    inQty.value=1;inComment.value='';toast('Wareneingang gebucht')
+  } finally { setLoading(btn,false); }
 }
 
 function getTrackingInfo(url){
@@ -931,11 +971,13 @@ function renderPositions(){
   const total=document.getElementById('issueTotalWeight');
   if(total)total.textContent=formatWeight(calculatePositionsWeight(positions));
 }
-async function saveIssue(){
+async function saveIssue(btn){
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
   const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
+  setLoading(btn,true);
+  try{
   if(sb){
     const rpcRes=await callCreateIssueRpc(issue);
     if(!rpcRes.error){
@@ -978,14 +1020,17 @@ async function saveIssue(){
     state.issues.unshift(issue);persist();
   }
   positions=[];['iCustomer','iProject','iDestination','iAddress','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
+  } finally { setLoading(btn,false); }
 }
 
-async function cancelIssue(id){
+async function cancelIssue(id,btn){
   const issue=state.issues.find(x=>x.id===id);
   if(!issue){toast('Ausgabe nicht gefunden');return}
   if(issue.status==='Storniert'){toast('Ausgabe ist bereits storniert');return}
   if(!confirm('Ausgabe wirklich stornieren und Bestand zurückbuchen?'))return;
 
+  setLoading(btn,true);
+  try{
   if(sb){
     const rpcRes=await callCancelIssueRpc(id,currentUserName());
     if(!rpcRes.error){
@@ -1039,19 +1084,23 @@ async function cancelIssue(id){
     persist();
   }
   toast('Ausgabe storniert und Bestand zurückgebucht')
+  } finally { setLoading(btn,false); }
 }
 
-async function updateIssueStatus(id,val){
+async function updateIssueStatus(id,val,sel){
   const i=state.issues.find(x=>x.id===id);
   if(!i)return;
   if(i.status==='Storniert'){toast('Stornierte Ausgaben können nicht geändert werden');render();return}
-  if(sb){
-    const {error}=await sb.from('lager_issues').update({status:val}).eq('id',id);
-    if(error){toast('Supabase Fehler: '+error.message);return}
-    await syncDown();
-  } else {
-    i.status=val;persist();
-  }
+  setLoading(sel,true);
+  try{
+    if(sb){
+      const {error}=await sb.from('lager_issues').update({status:val}).eq('id',id);
+      if(error){toast('Supabase Fehler: '+error.message);return}
+      await syncDown();
+    } else {
+      i.status=val;persist();
+    }
+  } finally { setLoading(sel,false); }
 }
 
 function render(){
@@ -1077,7 +1126,7 @@ function renderArticles(){
     <td>${a.category||'-'}</td><td>${a.barcode||'-'}</td><td>${storageLabel(a)}</td><td>${money(a.ek)}</td><td>${money(a.vk)}</td>
     <td><span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></td>
     <td>${a.dimensions||'-'}</td><td>${(+a.weight||0).toLocaleString('de-DE',{maximumFractionDigits:3})} kg</td><td>${a.note||'-'}</td>
-    <td><button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}')">Löschen</button></td>
+    <td><button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}',this)">Löschen</button></td>
   </tr>`).join('');
   articleTable.innerHTML=`<tr><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Gewicht</th><th>Notiz</th><th></th></tr>${rows}`;
 }
@@ -1087,14 +1136,14 @@ function renderIssues(){
     <div class="card" style="margin-bottom:10px;background:#131824">
       <div class="row" style="justify-content:space-between">
         <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">${i.tracking_label||i.tracking_code||'Tracking öffnen'}</a>`:(i.tracking_label||i.tracking_code||'-')}</small></div>
-        <select style="width:auto" ${i.status==='Storniert'?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value)">
+        <select style="width:auto" ${i.status==='Storniert'?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value,this)">
           ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
       <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small><br><b>Gesamtgewicht:</b> ${formatWeight(i.total_weight || calculatePositionsWeight(i.positions))}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
-        ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}')">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
+        ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}',this)">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
       </div>
     </div>`).join('');
   issueList.innerHTML=items||'<small class="muted">Noch keine Ausgaben.</small>';
