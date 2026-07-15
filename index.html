@@ -391,8 +391,8 @@ async function scannerStockChange(delta){
   const userName=currentUserName();
 
   if(sb){
-    const {error:e1}=await sb.from('lager_articles').update({stock:newStock,updated_at:now()}).eq('id',a.id);
-    if(e1){toast('Supabase Fehler: '+e1.message);return}
+    const res=await casUpdateStock(a,delta);
+    if(res.failure){toast(res.failure);await syncDown();return}
     const {error:e2}=await sb.from('lager_history').insert({
       type,article_id:a.id,article_name:a.name,qty,user_name:userName,
       comment:'Barcode-Scan: '+(a.barcode||''),customer:'',project:'',tracking_code:'',serials:a.barcode||''
@@ -609,7 +609,7 @@ function articleFromDb(a){
 function issueFromDb(i, positions){
   return {
     id:i.id,number:i.number,date:i.created_at,customer:i.customer||'',project:i.project||'',
-    destination:i.destination||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
+    destination:i.destination||'',address:i.address||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
     tracking_code:i.tracking_code||'',tracking_label:getTrackingInfo(i.tracking_link||i.tracking_code||'').label,status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',total_weight:+i.total_weight||0,
     positions:(positions||[]).filter(p=>p.issue_id===i.id).map(p=>({
       article_id:p.article_id,article:p.article_name||articleName(p.article_id),qty:+p.qty||0,serials:p.serials||''
@@ -624,6 +624,86 @@ function historyFromDb(h){
     user:h.user_name||'Unbekannt',customer:h.customer||'',project:h.project||'',
     tracking_code:h.tracking_code||'',serials:h.serials||'',comment:h.comment||''
   };
+}
+
+// Optimistic-locking: Bestand nur updaten, wenn er seit dem letzten Lesen unverändert ist.
+// Verhindert verlorene Updates, wenn zwei Nutzer gleichzeitig am selben Artikel arbeiten.
+async function casUpdateStock(article,delta){
+  const expected=+article.stock||0;
+  const target=expected+delta;
+  if(target<0) return {failure:'Nicht genügend Bestand für "'+article.name+'"'};
+  const {data,error}=await sb.from('lager_articles').update({stock:target,updated_at:now()}).eq('id',article.id).eq('stock',expected).select();
+  if(error) return {failure:error.message};
+  if(!data || !data.length) return {failure:'Bestand von "'+article.name+'" wurde inzwischen von jemand anderem geändert. Bitte erneut versuchen.'};
+  return {success:true,target};
+}
+
+// Wendet mehrere Bestandsänderungen nacheinander per CAS an (mehrere Positionen können denselben Artikel betreffen).
+// Bricht beim ersten Konflikt/Fehler ab und liefert genug Info, um die bereits angewendeten Änderungen zurückzurollen.
+async function applyStockDeltasSequential(items){
+  const stockState={}, originalStock={}, touchedIds=new Set();
+  for(const it of items){
+    const a=getArticle(it.article_id);
+    if(!a) continue;
+    if(!(it.article_id in stockState)) stockState[it.article_id]=+a.stock||0;
+    const expected=stockState[it.article_id];
+    const target=expected+it.delta;
+    if(target<0) return {failure:'Nicht genügend Bestand für "'+a.name+'"',touchedIds,originalStock};
+    const {data,error}=await sb.from('lager_articles').update({stock:target,updated_at:now()}).eq('id',a.id).eq('stock',expected).select();
+    if(error) return {failure:error.message,touchedIds,originalStock};
+    if(!data || !data.length) return {failure:'Bestand von "'+a.name+'" wurde inzwischen von jemand anderem geändert. Bitte erneut versuchen.',touchedIds,originalStock};
+    if(!touchedIds.has(it.article_id)){originalStock[it.article_id]=expected;touchedIds.add(it.article_id)}
+    stockState[it.article_id]=target;
+  }
+  return {success:true};
+}
+async function rollbackStock(originalStock,touchedIds){
+  for(const id of touchedIds){
+    await sb.from('lager_articles').update({stock:originalStock[id],updated_at:now()}).eq('id',id);
+  }
+}
+
+function isMissingFunctionError(error){
+  const msg=String(error?.message||'').toLowerCase();
+  return error?.code==='42883' || msg.includes('could not find function') || msg.includes('does not exist');
+}
+
+// Bevorzugter Weg: eine einzige serverseitige Transaktion (siehe supabase-migration-atomic-issues.sql).
+// Existiert die Funktion noch nicht in der DB, wird oben im Aufrufer auf den alten Weg zurückgefallen.
+async function callCreateIssueRpc(issue){
+  return await sb.rpc('lager_create_issue',{
+    p_issue:{
+      id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
+      address:issue.address,purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,
+      status:issue.status,created_by_name:issue.user,total_weight:issue.total_weight
+    },
+    p_positions:issue.positions.map(p=>({article_id:p.article_id,article_name:p.article,qty:p.qty,serials:p.serials||''}))
+  });
+}
+async function callCancelIssueRpc(issueId,userName){
+  return await sb.rpc('lager_cancel_issue',{p_issue_id:issueId,p_user_name:userName});
+}
+
+// Fallback ohne DB-Funktion: fügt die Ausgabe ein und probiert optionale Spalten (address, total_weight)
+// einzeln raus, falls die zugehörige SQL-Migration in der DB noch nicht gelaufen ist.
+async function insertIssueRow(issue){
+  const payload={
+    id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
+    address:issue.address,purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,
+    status:issue.status,created_by_name:issue.user,total_weight:issue.total_weight
+  };
+  const optionalCols=['address','total_weight'];
+  const missingCols=[];
+  for(let attempt=0;attempt<optionalCols.length+1;attempt++){
+    const {error}=await sb.from('lager_issues').insert(payload);
+    if(!error) return {error:null,missingCols};
+    const msg=String(error.message||'').toLowerCase();
+    const col=optionalCols.find(c=>payload[c]!==undefined && msg.includes(c));
+    if(!col) return {error};
+    delete payload[col];
+    missingCols.push(col);
+  }
+  return {error:new Error('Ausgabe konnte nicht gespeichert werden.')};
 }
 
 async function syncUp(){
@@ -752,9 +832,8 @@ async function bookIncoming(){
   const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
   const userName=currentUserName();
   if(sb){
-    const newStock=(+a.stock||0)+qty;
-    const {error:e1}=await sb.from('lager_articles').update({stock:newStock,updated_at:now()}).eq('id',a.id);
-    if(e1){toast('Supabase Fehler: '+e1.message);return}
+    const res=await casUpdateStock(a,qty);
+    if(res.failure){toast(res.failure);await syncDown();return}
     const {error:e2}=await sb.from('lager_history').insert({
       type:'Wareneingang',article_id:a.id,article_name:a.name,qty:qty,user_name:userName,
       comment:inComment.value||'',customer:'',project:'',tracking_code:'',serials:''
@@ -858,35 +937,39 @@ async function saveIssue(){
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
   const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
   if(sb){
-    let {error:eIssue}=await sb.from('lager_issues').insert({
-      id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
-      purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,status:issue.status,created_by_name:issue.user,total_weight:issue.total_weight
-    });
-    if(eIssue && String(eIssue.message||'').toLowerCase().includes('total_weight')){
-      const retry=await sb.from('lager_issues').insert({
-        id:issue.id,number:issue.number,customer:issue.customer,project:issue.project,destination:issue.destination,
-        purpose:issue.purpose,tracking_link:issue.tracking_link,tracking_code:issue.tracking_code,status:issue.status,created_by_name:issue.user
-      });
-      eIssue=retry.error;
-      if(!eIssue)toast('Ausgabe gespeichert. Für Cloud-Gewichte bitte die SQL-Migration ausführen.');
+    const rpcRes=await callCreateIssueRpc(issue);
+    if(!rpcRes.error){
+      await syncDown();
+    } else if(isMissingFunctionError(rpcRes.error)){
+      // Migration (supabase-migration-atomic-issues.sql) noch nicht ausgeführt: alter Weg als Fallback.
+      const {error:eIssue,missingCols}=await insertIssueRow(issue);
+      if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
+      if(missingCols?.length)toast('Ausgabe gespeichert. Für Cloud-Felder ('+missingCols.join(', ')+') bitte die SQL-Migration ausführen.');
+
+      const stockResult=await applyStockDeltasSequential(issue.positions.map(p=>({article_id:p.article_id,delta:-p.qty})));
+      if(stockResult.failure){
+        await rollbackStock(stockResult.originalStock,stockResult.touchedIds);
+        await sb.from('lager_issues').delete().eq('id',issue.id);
+        toast('Ausgabe abgebrochen: '+stockResult.failure);
+        await syncDown();
+        return;
+      }
+
+      const dbPositions=issue.positions.map(p=>({issue_id:issue.id,article_id:p.article_id,article_name:p.article,qty:p.qty,serials:p.serials||''}));
+      const {error:ePos}=await sb.from('lager_issue_positions').insert(dbPositions);
+      if(ePos){toast('Supabase Fehler: '+ePos.message);await syncDown();return}
+      const histRows=issue.positions.map(p=>({
+        type:'Ausgabe',issue_id:issue.id,issue_number:issue.number,article_id:p.article_id,article_name:p.article,
+        qty:-p.qty,user_name:issue.user,customer:issue.customer,project:issue.project,
+        tracking_code:issue.tracking_code,serials:p.serials||'',comment:issue.purpose
+      }));
+      const {error:eHist}=await sb.from('lager_history').insert(histRows);
+      if(eHist){toast('Supabase Fehler: '+eHist.message);return}
+      await syncDown();
+    } else {
+      toast('Ausgabe abgebrochen: '+rpcRes.error.message);
+      return;
     }
-    if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
-    const dbPositions=issue.positions.map(p=>({issue_id:issue.id,article_id:p.article_id,article_name:p.article,qty:p.qty,serials:p.serials||''}));
-    const {error:ePos}=await sb.from('lager_issue_positions').insert(dbPositions);
-    if(ePos){toast('Supabase Fehler: '+ePos.message);return}
-    for(const p of issue.positions){
-      const a=getArticle(p.article_id);
-      const {error:eStock}=await sb.from('lager_articles').update({stock:(+a.stock||0)-p.qty,updated_at:now()}).eq('id',a.id);
-      if(eStock){toast('Supabase Fehler: '+eStock.message);return}
-    }
-    const histRows=issue.positions.map(p=>({
-      type:'Ausgabe',issue_id:issue.id,issue_number:issue.number,article_id:p.article_id,article_name:p.article,
-      qty:-p.qty,user_name:issue.user,customer:issue.customer,project:issue.project,
-      tracking_code:issue.tracking_code,serials:p.serials||'',comment:issue.purpose
-    }));
-    const {error:eHist}=await sb.from('lager_history').insert(histRows);
-    if(eHist){toast('Supabase Fehler: '+eHist.message);return}
-    await syncDown();
   } else {
     issue.positions.forEach(p=>{
       const a=getArticle(p.article_id); a.stock=(+a.stock||0)-p.qty;
@@ -904,33 +987,42 @@ async function cancelIssue(id){
   if(!confirm('Ausgabe wirklich stornieren und Bestand zurückbuchen?'))return;
 
   if(sb){
-    for(const p of issue.positions){
-      const a=getArticle(p.article_id);
-      if(a){
-        const {error:eStock}=await sb.from('lager_articles').update({stock:(+a.stock||0)+(+p.qty||0),updated_at:now()}).eq('id',a.id);
-        if(eStock){toast('Supabase Fehler: '+eStock.message);return}
+    const rpcRes=await callCancelIssueRpc(id,currentUserName());
+    if(!rpcRes.error){
+      await syncDown();
+    } else if(isMissingFunctionError(rpcRes.error)){
+      // Migration (supabase-migration-atomic-issues.sql) noch nicht ausgeführt: alter Weg als Fallback.
+      const stockResult=await applyStockDeltasSequential(issue.positions.map(p=>({article_id:p.article_id,delta:+p.qty})));
+      if(stockResult.failure){
+        await rollbackStock(stockResult.originalStock,stockResult.touchedIds);
+        toast('Stornierung abgebrochen: '+stockResult.failure);
+        await syncDown();
+        return;
       }
-    }
-    const {error:eIssue}=await sb.from('lager_issues').update({status:'Storniert'}).eq('id',id);
-    if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
+      const {error:eIssue}=await sb.from('lager_issues').update({status:'Storniert'}).eq('id',id);
+      if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
 
-    const histRows=issue.positions.map(p=>({
-      type:'Storno',
-      issue_id:issue.id,
-      issue_number:issue.number,
-      article_id:p.article_id,
-      article_name:p.article,
-      qty:+p.qty||0,
-      user_name:currentUserName(),
-      customer:issue.customer,
-      project:issue.project,
-      tracking_code:issue.tracking_code,
-      serials:p.serials||'',
-      comment:'Ausgabe storniert – Bestand zurückgebucht'
-    }));
-    const {error:eHist}=await sb.from('lager_history').insert(histRows);
-    if(eHist){toast('Supabase Fehler: '+eHist.message);return}
-    await syncDown();
+      const histRows=issue.positions.map(p=>({
+        type:'Storno',
+        issue_id:issue.id,
+        issue_number:issue.number,
+        article_id:p.article_id,
+        article_name:p.article,
+        qty:+p.qty||0,
+        user_name:currentUserName(),
+        customer:issue.customer,
+        project:issue.project,
+        tracking_code:issue.tracking_code,
+        serials:p.serials||'',
+        comment:'Ausgabe storniert – Bestand zurückgebucht'
+      }));
+      const {error:eHist}=await sb.from('lager_history').insert(histRows);
+      if(eHist){toast('Supabase Fehler: '+eHist.message);return}
+      await syncDown();
+    } else {
+      toast('Stornierung abgebrochen: '+rpcRes.error.message);
+      return;
+    }
   } else {
     issue.positions.forEach(p=>{
       const a=getArticle(p.article_id);
