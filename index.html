@@ -220,6 +220,26 @@ window.addEventListener('error', function(e){
   </div>
 
 
+  <div id="issueMailModal" class="modal hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">📧 Ausgabe melden</h2>
+        <button class="secondary" onclick="closeIssueMailModal()">Schließen</button>
+      </div>
+      <p class="muted">Ausgabe wurde gespeichert. Mail unten kopieren oder direkt im eigenen Mailprogramm öffnen.</p>
+      <label>An</label>
+      <input id="mailTo" readonly>
+      <label>Betreff</label>
+      <input id="mailSubject" readonly>
+      <label>Text</label>
+      <textarea id="mailBody" readonly style="min-height:220px"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button onclick="copyIssueMail()">📋 In Zwischenablage kopieren</button>
+        <button class="blue" onclick="openIssueMailClient()">E-Mail-Programm öffnen</button>
+      </div>
+    </div>
+  </div>
+
   <section id="scanner" class="view hidden">
     <div class="grid">
       <div class="card col-5">
@@ -716,12 +736,51 @@ async function callCancelIssueRpc(issueId,userName){
   return await sb.rpc('lager_cancel_issue',{p_issue_id:issueId,p_user_name:userName});
 }
 
-// Interne Benachrichtigung (Buchhaltung/Onboarding) bei jeder neuen Ausgabe.
-// Bewusst "fire and forget": ein E-Mail-Fehler soll die gespeicherte Ausgabe nicht in Frage stellen.
-function notifyIssueCreated(issue){
-  sb.functions.invoke('notify-issue',{body:{issue}}).then(({error})=>{
-    if(error)console.error('Ausgabe-Benachrichtigung fehlgeschlagen:',error);
-  }).catch(e=>console.error('Ausgabe-Benachrichtigung fehlgeschlagen:',e));
+// Interne Benachrichtigung (Buchhaltung/Onboarding) bei jeder neuen Ausgabe:
+// statt automatischem Mailversand (SMTP war zu unzuverlässig) wird eine fertige Mail
+// zum Kopieren bzw. Öffnen im eigenen Mailprogramm angezeigt.
+const ISSUE_MAIL_RECIPIENTS=['buchhaltung@smoothr.de','onboarding@smoothr.de','r.kraemling@smoothr.de'];
+function formatIssueMailBody(issue){
+  const positions=(issue.positions||[]).map(p=>`- ${p.qty} x ${p.article}${p.serials?` (SN: ${p.serials})`:''}`).join('\n')||'-';
+  return [
+    `Neue Ausgabe ${issue.number}`,
+    '',
+    `Kunde: ${issue.customer||'-'}`,
+    `Projekt: ${issue.project||'-'}`,
+    `Zielort: ${issue.destination||'-'}`,
+    `Adresse: ${issue.address||'-'}`,
+    `Angebotsnummer: ${issue.offer||'-'}`,
+    `Verwendungszweck: ${issue.purpose||'-'}`,
+    '',
+    'Positionen:',
+    positions,
+    '',
+    `Gesamtgewicht: ${formatWeight(issue.total_weight)}`,
+    `Tracking: ${issue.tracking_link||issue.tracking_code||'-'}`,
+    `Erstellt von: ${issue.user||'-'}`
+  ].join('\n');
+}
+function showIssueMailPreview(issue){
+  mailTo.value=ISSUE_MAIL_RECIPIENTS.join(', ');
+  mailSubject.value=`Neue Ausgabe ${issue.number} – ${issue.customer||''}`;
+  mailBody.value=formatIssueMailBody(issue);
+  issueMailModal.classList.remove('hidden');
+}
+function closeIssueMailModal(){issueMailModal.classList.add('hidden')}
+async function copyIssueMail(){
+  const text=`An: ${mailTo.value}\nBetreff: ${mailSubject.value}\n\n${mailBody.value}`;
+  try{
+    await navigator.clipboard.writeText(text);
+    toast('E-Mail in die Zwischenablage kopiert');
+  }catch(e){
+    toast('Kopieren fehlgeschlagen – bitte Text manuell markieren und kopieren');
+  }
+}
+function openIssueMailClient(){
+  const url='mailto:'+ISSUE_MAIL_RECIPIENTS.join(',')
+    +'?subject='+encodeURIComponent(mailSubject.value)
+    +'&body='+encodeURIComponent(mailBody.value);
+  window.location.href=url;
 }
 
 // Fallback ohne DB-Funktion: fügt die Ausgabe ein und probiert optionale Spalten (address, total_weight)
@@ -1028,7 +1087,7 @@ async function saveIssue(btn){
     });
     state.issues.unshift(issue);persist();
   }
-  if(sb) notifyIssueCreated(issue);
+  showIssueMailPreview(issue);
   positions=[];['iCustomer','iProject','iDestination','iAddress','iOffer','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
   } finally { setLoading(btn,false); }
 }
