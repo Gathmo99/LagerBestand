@@ -240,6 +240,32 @@ window.addEventListener('error', function(e){
     </div>
   </div>
 
+  <div id="issueEditModal" class="modal hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Ausgabe bearbeiten</h2>
+        <button class="secondary" onclick="closeIssueEditModal()">Schließen</button>
+      </div>
+      <small class="muted">Positionen/Menge können hier nicht geändert werden (wirken sich auf den Bestand aus) – nur Angaben wie Tracking, Adresse etc.</small>
+      <input id="ieId" type="hidden">
+      <div class="grid">
+        <div class="col-6"><label>Kunde</label><input id="ieCustomer"></div>
+        <div class="col-6"><label>Projekt / Ticket</label><input id="ieProject"></div>
+        <div class="col-6"><label>Zielort</label><input id="ieDestination"></div>
+        <div class="col-6"><label>Adresse</label><input id="ieAddress"></div>
+        <div class="col-6"><label>Angebotsnummer</label><input id="ieOffer"></div>
+        <div class="col-12"><label>Tracking-Link</label><input id="ieTracking" placeholder="DHL/FedEx/UPS Link"></div>
+        <div class="col-12"><label>Verwendungszweck</label><textarea id="iePurpose"></textarea></div>
+      </div>
+      <hr>
+      <label>Positionen</label>
+      <div id="issueEditPositions" class="position-box"></div>
+      <div class="row" style="margin-top:10px">
+        <button onclick="saveIssueEdit(this)">Speichern</button>
+      </div>
+    </div>
+  </div>
+
   <section id="scanner" class="view hidden">
     <div class="grid">
       <div class="card col-5">
@@ -743,7 +769,7 @@ const ISSUE_MAIL_RECIPIENTS=['buchhaltung@smoothr.de','onboarding@smoothr.de','r
 function formatIssueMailBody(issue){
   const positions=(issue.positions||[]).map(p=>`- ${p.qty} x ${p.article}${p.serials?` (SN: ${p.serials})`:''}`).join('\n')||'-';
   return [
-    `Neue Ausgabe ${issue.number}`,
+    `Neuer Versand ${issue.number}`,
     '',
     `Kunde: ${issue.customer||'-'}`,
     `Projekt: ${issue.project||'-'}`,
@@ -762,7 +788,7 @@ function formatIssueMailBody(issue){
 }
 function showIssueMailPreview(issue){
   mailTo.value=ISSUE_MAIL_RECIPIENTS.join(', ');
-  mailSubject.value=`Neue Ausgabe ${issue.number} – ${issue.customer||''}`;
+  mailSubject.value=`Neuer Versand ${issue.number} – ${issue.customer||''}`;
   mailBody.value=formatIssueMailBody(issue);
   issueMailModal.classList.remove('hidden');
 }
@@ -1043,7 +1069,7 @@ async function saveIssue(btn){
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
-  const issue={id:uid(),number:'AUS-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),offer:(document.getElementById('iOffer')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
+  const issue={id:uid(),number:'VERSAND-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),offer:(document.getElementById('iOffer')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
   setLoading(btn,true);
   try{
   if(sb){
@@ -1156,6 +1182,68 @@ async function cancelIssue(id,btn){
   } finally { setLoading(btn,false); }
 }
 
+// Fallback-freundliches Update: probiert optionale Spalten (address, offer) einzeln raus,
+// falls die zugehörige Migration in der DB noch nicht gelaufen ist.
+async function updateIssueRow(id,fields){
+  const payload={...fields};
+  const optionalCols=['address','offer'];
+  for(let attempt=0;attempt<optionalCols.length+1;attempt++){
+    const {error}=await sb.from('lager_issues').update(payload).eq('id',id);
+    if(!error) return {error:null};
+    const msg=String(error.message||'').toLowerCase();
+    const col=optionalCols.find(c=>payload[c]!==undefined && msg.includes(c));
+    if(!col) return {error};
+    delete payload[col];
+  }
+  return {error:new Error('Ausgabe konnte nicht aktualisiert werden.')};
+}
+
+function editIssue(id){
+  const i=state.issues.find(x=>x.id===id);
+  if(!i)return;
+  ieId.value=i.id;
+  ieCustomer.value=i.customer||'';
+  ieProject.value=i.project||'';
+  ieDestination.value=i.destination||'';
+  ieAddress.value=i.address||'';
+  ieOffer.value=i.offer||'';
+  ieTracking.value=i.tracking_link||i.tracking_code||'';
+  iePurpose.value=i.purpose||'';
+  issueEditPositions.innerHTML=(i.positions||[]).map(p=>`${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}`).join('<br>')||'<small class="muted">Keine Positionen.</small>';
+  issueEditModal.classList.remove('hidden');
+}
+function closeIssueEditModal(){issueEditModal.classList.add('hidden')}
+async function saveIssueEdit(btn){
+  const id=ieId.value;
+  const i=state.issues.find(x=>x.id===id);
+  if(!i){toast('Ausgabe nicht gefunden');return}
+  const fields={
+    customer:ieCustomer.value.trim(),
+    project:ieProject.value.trim(),
+    destination:ieDestination.value.trim(),
+    address:ieAddress.value.trim(),
+    offer:ieOffer.value.trim(),
+    purpose:iePurpose.value.trim(),
+    tracking_link:ieTracking.value.trim(),
+    tracking_code:extractTrackingCode(ieTracking.value)
+  };
+  if(!fields.customer){toast('Kunde fehlt');return}
+  setLoading(btn,true);
+  try{
+    if(sb){
+      const {error}=await updateIssueRow(id,fields);
+      if(error){toast('Supabase Fehler: '+error.message);return}
+      await syncDown();
+    } else {
+      Object.assign(i,fields);
+      i.tracking_label=getTrackingInfo(fields.tracking_link).label;
+      persist();
+    }
+    closeIssueEditModal();
+    toast('Ausgabe aktualisiert');
+  } finally { setLoading(btn,false); }
+}
+
 async function updateIssueStatus(id,val,sel){
   const i=state.issues.find(x=>x.id===id);
   if(!i)return;
@@ -1212,7 +1300,7 @@ function renderIssues(){
       <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small><br>${i.offer?`<small>Angebot: ${i.offer}</small><br>`:''}<b>Gesamtgewicht:</b> ${formatWeight(i.total_weight || calculatePositionsWeight(i.positions))}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
-        ${i.status!=='Storniert'?`<button class="danger" onclick="cancelIssue('${i.id}',this)">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
+        ${i.status!=='Storniert'?`<button class="secondary" onclick="editIssue('${i.id}')">Bearbeiten</button> <button class="danger" onclick="cancelIssue('${i.id}',this)">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
       </div>
     </div>`).join('');
   issueList.innerHTML=items||'<small class="muted">Noch keine Ausgaben.</small>';
