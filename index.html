@@ -109,7 +109,7 @@ window.addEventListener('error', function(e){
 <header>
   <div>
     <h1>📦 Lagerverwaltung Intern</h1>
-    <small>Artikel, Wareneingänge, Sammel-Ausgaben, Tracking & Historie</small>
+    <small>Artikel, Wareneingänge, Versand, Tracking & Historie</small>
   </div>
   <div class="row">
     <span id="currentUserBadge" class="badge">Nicht angemeldet</span>
@@ -127,7 +127,7 @@ window.addEventListener('error', function(e){
     <button class="tab" onclick="showTab('articles',this)">Artikel</button>
     <button class="tab" onclick="showTab('scanner',this)">Scanner</button>
     <button class="tab" onclick="showTab('incoming',this)">Wareneingang</button>
-    <button class="tab" onclick="showTab('issues',this)">Ausgaben</button>
+    <button class="tab" onclick="showTab('issues',this)">Versand</button>
     <button class="tab" onclick="showTab('history',this)">Historie</button>
   </div>
 
@@ -223,10 +223,10 @@ window.addEventListener('error', function(e){
   <div id="issueMailModal" class="modal hidden">
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <h2 style="margin:0">📧 Ausgabe melden</h2>
+        <h2 style="margin:0">📧 Versand melden</h2>
         <button class="secondary" onclick="closeIssueMailModal()">Schließen</button>
       </div>
-      <p class="muted">Ausgabe wurde gespeichert. Mail unten kopieren oder direkt im eigenen Mailprogramm öffnen.</p>
+      <p class="muted">Versand wurde gespeichert. Mail unten kopieren oder direkt im eigenen Mailprogramm öffnen.</p>
       <label>An</label>
       <input id="mailTo" readonly>
       <label>Betreff</label>
@@ -243,7 +243,7 @@ window.addEventListener('error', function(e){
   <div id="issueEditModal" class="modal hidden">
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <h2 style="margin:0">Ausgabe bearbeiten</h2>
+        <h2 style="margin:0">Versand bearbeiten</h2>
         <button class="secondary" onclick="closeIssueEditModal()">Schließen</button>
       </div>
       <small class="muted">Positionen/Menge können hier nicht geändert werden (wirken sich auf den Bestand aus) – nur Angaben wie Tracking, Adresse etc.</small>
@@ -308,7 +308,7 @@ window.addEventListener('error', function(e){
   <section id="issues" class="view hidden">
     <div class="grid">
       <div class="card col-5">
-        <h2>🚚 Ausgabe erstellen</h2>
+        <h2>🚚 Versand erstellen</h2>
         <div class="grid">
           <div class="col-6"><label>Kunde</label><input id="iCustomer"></div>
           <div class="col-6"><label>Projekt / Ticket</label><input id="iProject"></div>
@@ -321,6 +321,9 @@ window.addEventListener('error', function(e){
         </div>
         <hr>
         <h3>Positionen</h3>
+        <label>Barcode scannen (fügt direkt eine Position hinzu)</label>
+        <input id="issueScanInput" autocomplete="off" inputmode="none" placeholder="Barcode scannen ..." onkeydown="handleIssueScanKey(event)">
+        <hr>
         <div class="grid">
           <div class="col-6"><label>Artikel</label><select id="posArticle"></select></div>
           <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1"></div>
@@ -328,12 +331,12 @@ window.addEventListener('error', function(e){
         </div>
         <button class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
         <div id="positionsList"></div>
-        <div class="position-box" style="margin-top:12px"><b>Gesamtgewicht der Ausgabe:</b> <span id="issueTotalWeight">0 kg</span></div>
-        <button style="margin-top:12px" onclick="saveIssue(this)">Ausgabe speichern</button>
+        <div class="position-box" style="margin-top:12px"><b>Gesamtgewicht des Versands:</b> <span id="issueTotalWeight">0 kg</span></div>
+        <button style="margin-top:12px" onclick="saveIssue(this)">Versand speichern</button>
       </div>
 
       <div class="card col-7">
-        <h2>Ausgaben</h2>
+        <h2>Versand</h2>
         <input class="search" id="issueSearch" oninput="render()" placeholder="Suche Kunde, Projekt, Tracking, Seriennummer ...">
         <div id="issueList"></div>
       </div>
@@ -421,7 +424,7 @@ function renderScanResult(a,raw=''){
       <div class="row">
         <button onclick="scannerStockChange(1,this)">+1 einlagern</button>
         <button class="warn" onclick="scannerStockChange(-1,this)">−1 auslagern</button>
-        <button class="blue" onclick="addScannedToIssue()">Zur Ausgabe hinzufügen</button>
+        <button class="blue" onclick="addScannedToIssue()">Zum Versand hinzufügen</button>
         <button class="secondary" onclick="editArticle('${a.id}')">Artikel bearbeiten</button>
       </div>
     </div>`;
@@ -469,9 +472,9 @@ function addScannedToIssue(){
   if(existing)existing.qty+=1;
   else positions.push({article_id:a.id,article:a.name,qty:1,serials:a.barcode||''});
   renderPositions();
-  const btn=[...document.querySelectorAll('.tab')].find(x=>x.textContent.trim()==='Ausgaben');
+  const btn=[...document.querySelectorAll('.tab')].find(x=>x.textContent.trim()==='Versand');
   if(btn)showTab('issues',btn);
-  toast('Artikel zur Ausgabe hinzugefügt');
+  toast('Artikel zum Versand hinzugefügt');
 }
 async function startCameraScanner(){
   if(!navigator.mediaDevices?.getUserMedia){toast('Kamera wird in diesem Browser nicht unterstützt');return}
@@ -762,7 +765,7 @@ async function callCancelIssueRpc(issueId,userName){
   return await sb.rpc('lager_cancel_issue',{p_issue_id:issueId,p_user_name:userName});
 }
 
-// Interne Benachrichtigung (Buchhaltung/Onboarding) bei jeder neuen Ausgabe:
+// Interne Benachrichtigung (Buchhaltung/Onboarding) bei jedem neuen Versand:
 // statt automatischem Mailversand (SMTP war zu unzuverlässig) wird eine fertige Mail
 // zum Kopieren bzw. Öffnen im eigenen Mailprogramm angezeigt.
 const ISSUE_MAIL_RECIPIENTS=['buchhaltung@smoothr.de','onboarding@smoothr.de','r.kraemling@smoothr.de'];
@@ -809,7 +812,7 @@ function openIssueMailClient(){
   window.location.href=url;
 }
 
-// Fallback ohne DB-Funktion: fügt die Ausgabe ein und probiert optionale Spalten (address, total_weight)
+// Fallback ohne DB-Funktion: fügt den Versand ein und probiert optionale Spalten (address, total_weight)
 // einzeln raus, falls die zugehörige SQL-Migration in der DB noch nicht gelaufen ist.
 async function insertIssueRow(issue){
   const payload={
@@ -828,7 +831,7 @@ async function insertIssueRow(issue){
     delete payload[col];
     missingCols.push(col);
   }
-  return {error:new Error('Ausgabe konnte nicht gespeichert werden.')};
+  return {error:new Error('Versand konnte nicht gespeichert werden.')};
 }
 
 async function syncUp(){
@@ -1048,6 +1051,24 @@ function showTrackingPreview(){
   const info=getTrackingInfo(iTracking.value);
   trackingPreview.textContent=info.label||'-';
 }
+function handleIssueScanKey(e){
+  if(e.key==='Enter'){e.preventDefault();processIssueScan()}
+}
+function processIssueScan(code){
+  const input=document.getElementById('issueScanInput');
+  const raw=normalizeBarcode(code||input?.value);
+  if(!raw){toast('Kein Barcode erkannt');return}
+  if(input)input.value='';
+  const a=findArticleByBarcode(raw);
+  if(!a){toast('Kein Artikel zu diesem Barcode gefunden');input?.focus();return}
+  if((+a.stock||0)<=0){toast('Kein Bestand verfügbar für '+a.name);input?.focus();return}
+  const existing=positions.find(p=>p.article_id===a.id);
+  if(existing)existing.qty+=1;
+  else positions.push({article_id:a.id,article:a.name,qty:1,serials:a.barcode||''});
+  renderPositions();
+  toast('Hinzugefügt: '+a.name);
+  input?.focus();
+}
 function addPosition(){
   const a=getArticle(posArticle.value), qty=+posQty.value||0; if(!a||qty<=0){toast('Position prüfen');return}
   if(qty>(+a.stock||0)){toast('Nicht genug Bestand');return}
@@ -1080,13 +1101,13 @@ async function saveIssue(btn){
       // Migration (supabase-migration-atomic-issues.sql) noch nicht ausgeführt: alter Weg als Fallback.
       const {error:eIssue,missingCols}=await insertIssueRow(issue);
       if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
-      if(missingCols?.length)toast('Ausgabe gespeichert. Für Cloud-Felder ('+missingCols.join(', ')+') bitte die SQL-Migration ausführen.');
+      if(missingCols?.length)toast('Versand gespeichert. Für Cloud-Felder ('+missingCols.join(', ')+') bitte die SQL-Migration ausführen.');
 
       const stockResult=await applyStockDeltasSequential(issue.positions.map(p=>({article_id:p.article_id,delta:-p.qty})));
       if(stockResult.failure){
         await rollbackStock(stockResult.originalStock,stockResult.touchedIds);
         await sb.from('lager_issues').delete().eq('id',issue.id);
-        toast('Ausgabe abgebrochen: '+stockResult.failure);
+        toast('Versand abgebrochen: '+stockResult.failure);
         await syncDown();
         return;
       }
@@ -1095,7 +1116,7 @@ async function saveIssue(btn){
       const {error:ePos}=await sb.from('lager_issue_positions').insert(dbPositions);
       if(ePos){toast('Supabase Fehler: '+ePos.message);await syncDown();return}
       const histRows=issue.positions.map(p=>({
-        type:'Ausgabe',issue_id:issue.id,issue_number:issue.number,article_id:p.article_id,article_name:p.article,
+        type:'Versand',issue_id:issue.id,issue_number:issue.number,article_id:p.article_id,article_name:p.article,
         qty:-p.qty,user_name:issue.user,customer:issue.customer,project:issue.project,
         tracking_code:issue.tracking_code,serials:p.serials||'',comment:issue.purpose
       }));
@@ -1103,26 +1124,26 @@ async function saveIssue(btn){
       if(eHist){toast('Supabase Fehler: '+eHist.message);return}
       await syncDown();
     } else {
-      toast('Ausgabe abgebrochen: '+rpcRes.error.message);
+      toast('Versand abgebrochen: '+rpcRes.error.message);
       return;
     }
   } else {
     issue.positions.forEach(p=>{
       const a=getArticle(p.article_id); a.stock=(+a.stock||0)-p.qty;
-      state.history.unshift({id:uid(),type:'Ausgabe',date:issue.date,issue_id:issue.id,issue_number:issue.number,article_id:a.id,article:a.name,qty:-p.qty,user:issue.user,customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,serials:p.serials,comment:issue.purpose});
+      state.history.unshift({id:uid(),type:'Versand',date:issue.date,issue_id:issue.id,issue_number:issue.number,article_id:a.id,article:a.name,qty:-p.qty,user:issue.user,customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,serials:p.serials,comment:issue.purpose});
     });
     state.issues.unshift(issue);persist();
   }
   showIssueMailPreview(issue);
-  positions=[];['iCustomer','iProject','iDestination','iAddress','iOffer','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Ausgabe gespeichert')
+  positions=[];['iCustomer','iProject','iDestination','iAddress','iOffer','iPurpose','iTracking'].forEach(id=>document.getElementById(id).value='');trackingPreview.textContent='-';renderPositions();toast('Versand gespeichert')
   } finally { setLoading(btn,false); }
 }
 
 async function cancelIssue(id,btn){
   const issue=state.issues.find(x=>x.id===id);
-  if(!issue){toast('Ausgabe nicht gefunden');return}
-  if(issue.status==='Storniert'){toast('Ausgabe ist bereits storniert');return}
-  if(!confirm('Ausgabe wirklich stornieren und Bestand zurückbuchen?'))return;
+  if(!issue){toast('Versand nicht gefunden');return}
+  if(issue.status==='Storniert'){toast('Versand ist bereits storniert');return}
+  if(!confirm('Versand wirklich stornieren und Bestand zurückbuchen?'))return;
 
   setLoading(btn,true);
   try{
@@ -1154,7 +1175,7 @@ async function cancelIssue(id,btn){
         project:issue.project,
         tracking_code:issue.tracking_code,
         serials:p.serials||'',
-        comment:'Ausgabe storniert – Bestand zurückgebucht'
+        comment:'Versand storniert – Bestand zurückgebucht'
       }));
       const {error:eHist}=await sb.from('lager_history').insert(histRows);
       if(eHist){toast('Supabase Fehler: '+eHist.message);return}
@@ -1172,13 +1193,13 @@ async function cancelIssue(id,btn){
         article_id:p.article_id,article:p.article,qty:+p.qty||0,
         user:currentUserName(),
         customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,
-        serials:p.serials||'',comment:'Ausgabe storniert – Bestand zurückgebucht'
+        serials:p.serials||'',comment:'Versand storniert – Bestand zurückgebucht'
       });
     });
     issue.status='Storniert';
     persist();
   }
-  toast('Ausgabe storniert und Bestand zurückgebucht')
+  toast('Versand storniert und Bestand zurückgebucht')
   } finally { setLoading(btn,false); }
 }
 
@@ -1195,7 +1216,7 @@ async function updateIssueRow(id,fields){
     if(!col) return {error};
     delete payload[col];
   }
-  return {error:new Error('Ausgabe konnte nicht aktualisiert werden.')};
+  return {error:new Error('Versand konnte nicht aktualisiert werden.')};
 }
 
 function editIssue(id){
@@ -1216,7 +1237,7 @@ function closeIssueEditModal(){issueEditModal.classList.add('hidden')}
 async function saveIssueEdit(btn){
   const id=ieId.value;
   const i=state.issues.find(x=>x.id===id);
-  if(!i){toast('Ausgabe nicht gefunden');return}
+  if(!i){toast('Versand nicht gefunden');return}
   const fields={
     customer:ieCustomer.value.trim(),
     project:ieProject.value.trim(),
@@ -1240,14 +1261,14 @@ async function saveIssueEdit(btn){
       persist();
     }
     closeIssueEditModal();
-    toast('Ausgabe aktualisiert');
+    toast('Versand aktualisiert');
   } finally { setLoading(btn,false); }
 }
 
 async function updateIssueStatus(id,val,sel){
   const i=state.issues.find(x=>x.id===id);
   if(!i)return;
-  if(i.status==='Storniert'){toast('Stornierte Ausgaben können nicht geändert werden');render();return}
+  if(i.status==='Storniert'){toast('Stornierter Versand kann nicht geändert werden');render();return}
   setLoading(sel,true);
   try{
     if(sb){
@@ -1300,10 +1321,10 @@ function renderIssues(){
       <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small><br>${i.offer?`<small>Angebot: ${i.offer}</small><br>`:''}<b>Gesamtgewicht:</b> ${formatWeight(i.total_weight || calculatePositionsWeight(i.positions))}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
-        ${i.status!=='Storniert'?`<button class="secondary" onclick="editIssue('${i.id}')">Bearbeiten</button> <button class="danger" onclick="cancelIssue('${i.id}',this)">Ausgabe stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
+        ${i.status!=='Storniert'?`<button class="secondary" onclick="editIssue('${i.id}')">Bearbeiten</button> <button class="danger" onclick="cancelIssue('${i.id}',this)">Versand stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
       </div>
     </div>`).join('');
-  issueList.innerHTML=items||'<small class="muted">Noch keine Ausgaben.</small>';
+  issueList.innerHTML=items||'<small class="muted">Noch kein Versand.</small>';
 }
 function renderHistory(){
   const q=(historySearch?.value||'').toLowerCase();
