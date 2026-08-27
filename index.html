@@ -100,6 +100,7 @@ window.addEventListener('error', function(e){
   </div>
   <div class="row">
     <span id="currentUserBadge" class="badge">Nicht angemeldet</span>
+    <span id="roleBadge" class="badge hidden"></span>
     <span id="syncState" class="badge">Lokalmodus</span>
     <button class="secondary" onclick="exportAll()">Backup JSON</button>
     <button class="danger" onclick="logout(this)">Logout</button>
@@ -136,7 +137,7 @@ window.addEventListener('error', function(e){
           <h2 style="margin:0">Artikelbestand</h2>
           <small>Bestand zuerst. Artikel anlegen oder bearbeiten öffnet als Fenster.</small>
         </div>
-        <button onclick="openArticleModal()">+ Artikel anlegen</button>
+        <button id="btnAddArticle" onclick="openArticleModal()">+ Artikel anlegen</button>
       </div>
       <input class="search" id="articleSearch" oninput="render()" placeholder="Suche nach Name, Marke, Modellnummer, Kategorie ...">
       <div style="overflow:auto"><table id="articleTable"></table></div>
@@ -300,7 +301,7 @@ window.addEventListener('error', function(e){
         <div class="col-2"><label>Menge</label><input id="inQty" type="number" value="1"></div>
         <div class="col-4"><label>Kommentar</label><input id="inComment" placeholder="Wareneingang, Rückläufer ..."></div>
       </div>
-      <button style="margin-top:10px" onclick="bookIncoming(this)">Einlagern</button>
+      <button id="btnBookIncoming" style="margin-top:10px" onclick="bookIncoming(this)">Einlagern</button>
     </div>
   </section>
 
@@ -329,10 +330,10 @@ window.addEventListener('error', function(e){
           <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1"></div>
           <div class="col-3"><label>Seriennummer(n)</label><input id="posSerial" placeholder="optional"></div>
         </div>
-        <button class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
+        <button id="btnAddPosition" class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
         <div id="positionsList"></div>
         <div class="position-box" style="margin-top:12px"><b>Gesamtgewicht des Versands:</b> <span id="issueTotalWeight">0 kg</span></div>
-        <button style="margin-top:12px" onclick="saveIssue(this)">Versand speichern</button>
+        <button id="btnSaveIssue" style="margin-top:12px" onclick="saveIssue(this)">Versand speichern</button>
       </div>
 
       <div class="card col-7">
@@ -366,6 +367,48 @@ const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 let state={articles:[],issues:[],history:[]};
 let positions=[];
 let sb=null, user=null;
+const ROLE_ADMIN='admin', ROLE_STAFF='mitarbeiter', ROLE_VIEWER='viewer';
+let userRole=ROLE_VIEWER;
+function isAdmin(){return userRole===ROLE_ADMIN}
+function canBook(){return userRole===ROLE_ADMIN || userRole===ROLE_STAFF}
+function denyIfNoPermission(ok){
+  if(!ok){toast('Keine Berechtigung für diese Aktion');return true}
+  return false;
+}
+async function fetchUserRole(){
+  if(!sb || !user){userRole=ROLE_VIEWER;applyRoleUI();return}
+  try{
+    const {data,error}=await sb.from('lager_profiles').select('role').eq('id',user.id).single();
+    if(error || !data || !data.role){
+      userRole=ROLE_VIEWER;
+      toast('Keine Rolle hinterlegt – nur Lesezugriff. Bitte Admin kontaktieren.');
+    } else {
+      userRole=data.role;
+    }
+  }catch(e){
+    userRole=ROLE_VIEWER;
+  }
+  applyRoleUI();
+  render();
+}
+function roleLabel(){
+  return userRole===ROLE_ADMIN?'Admin':userRole===ROLE_STAFF?'Mitarbeiter':'Nur Ansicht';
+}
+function applyRoleUI(){
+  const badge=document.getElementById('roleBadge');
+  if(badge){badge.textContent='Rolle: '+roleLabel();badge.classList.remove('hidden')}
+  const admin=isAdmin(), book=canBook();
+  const addArticleBtn=document.getElementById('btnAddArticle');
+  if(addArticleBtn)addArticleBtn.classList.toggle('hidden',!admin);
+  const bookIncomingBtn=document.getElementById('btnBookIncoming');
+  if(bookIncomingBtn){bookIncomingBtn.disabled=!book}
+  const addPosBtn=document.getElementById('btnAddPosition');
+  if(addPosBtn)addPosBtn.disabled=!book;
+  const saveIssueBtn=document.getElementById('btnSaveIssue');
+  if(saveIssueBtn)saveIssueBtn.disabled=!book;
+  const issueScanInput=document.getElementById('issueScanInput');
+  if(issueScanInput)issueScanInput.disabled=!book;
+}
 let scannedArticleId=null;
 let cameraStream=null;
 let cameraTimer=null;
@@ -453,10 +496,11 @@ function renderScanResult(a,raw=''){
       <b>Marke / Modell:</b> ${a.brand||'-'} ${a.model||''}<br>
       <b>Bestand:</b> <span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span><br><b>Gewicht:</b> ${formatWeight(a.weight)}</p>
       <div class="row">
+        ${canBook()?`
         <button onclick="scannerStockChange(1,this)">+1 einlagern</button>
         <button class="warn" onclick="scannerStockChange(-1,this)">−1 auslagern</button>
-        <button class="blue" onclick="addScannedToIssue()">Zum Versand hinzufügen</button>
-        <button class="secondary" onclick="editArticle('${a.id}')">Artikel bearbeiten</button>
+        <button class="blue" onclick="addScannedToIssue()">Zum Versand hinzufügen</button>`:''}
+        ${isAdmin()?`<button class="secondary" onclick="editArticle('${a.id}')">Artikel bearbeiten</button>`:''}
       </div>
     </div>`;
 }
@@ -466,6 +510,7 @@ function openNewArticleFromScan(code){
   aName.focus();
 }
 async function scannerStockChange(delta,btn){
+  if(denyIfNoPermission(canBook()))return;
   const a=getArticle(scannedArticleId);
   if(!a){toast('Kein Artikel ausgewählt');return}
   if(delta<0 && (+a.stock||0)<=0){toast('Kein Bestand verfügbar');return}
@@ -496,6 +541,7 @@ async function scannerStockChange(delta,btn){
   } finally { setLoading(btn,false); }
 }
 function addScannedToIssue(){
+  if(denyIfNoPermission(canBook()))return;
   const a=getArticle(scannedArticleId);
   if(!a){toast('Kein Artikel ausgewählt');return}
   if((+a.stock||0)<=0){toast('Kein Bestand verfügbar');return}
@@ -600,6 +646,8 @@ function showLoginScreen(){
 function enterLocalMode(){
   user={email:'Lokaler Testmodus',user_metadata:{name:'Lokaler Testmodus'}};
   sb=null;
+  userRole=ROLE_ADMIN;
+  applyRoleUI();
   if(window.syncState) syncState.textContent='Lokalmodus';
   showApp();
   render();
@@ -616,6 +664,7 @@ function initSupabase(){
           user=data.user;
           showApp();
           syncDown();
+          fetchUserRole();
           subscribeRealtime();
         } else {
           showLoginScreen();
@@ -647,6 +696,7 @@ async function login(btn){
     showApp();
     toast('Eingeloggt');
     await syncDown();
+    await fetchUserRole();
     subscribeRealtime();
   } finally { setLoading(btn,false); }
 }
@@ -668,6 +718,7 @@ async function logout(btn){
   try{
     if(sb)await sb.auth.signOut();
     user=null;
+    userRole=ROLE_VIEWER;
     showLoginScreen();
     toast('Ausgeloggt');
   } finally { setLoading(btn,false); }
@@ -957,6 +1008,7 @@ function storageLabel(a){
 }
 function closeArticleModal(){articleModal.classList.add('hidden')}
 async function saveArticle(btn){
+  if(denyIfNoPermission(isAdmin()))return;
   const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.4).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),image_url:aImageUrl.value||'',updated_at:now()};
   if(!obj.name){toast('Name fehlt');return}
   setLoading(btn,true);
@@ -995,6 +1047,7 @@ async function saveArticle(btn){
 }
 function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';pendingArticleImageFile=null;aImageFile.value='';aImageUrl.value=a.image_url||'';showArticleImagePreview(a.image_url||'');articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
 async function deleteArticle(id,btn){
+  if(denyIfNoPermission(isAdmin()))return;
   if(!confirm('Artikel wirklich löschen?'))return;
   setLoading(btn,true);
   try{
@@ -1010,6 +1063,7 @@ async function deleteArticle(id,btn){
 function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment','aImageUrl'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;pendingArticleImageFile=null;aImageFile.value='';showArticleImagePreview('');articleFormTitle.textContent='Artikel anlegen'}
 
 async function bookIncoming(btn){
+  if(denyIfNoPermission(canBook()))return;
   const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
   const userName=currentUserName();
   setLoading(btn,true);
@@ -1102,6 +1156,7 @@ function handleIssueScanKey(e){
   if(e.key==='Enter'){e.preventDefault();processIssueScan()}
 }
 function processIssueScan(code){
+  if(denyIfNoPermission(canBook()))return;
   const input=document.getElementById('issueScanInput');
   const raw=normalizeBarcode(code||input?.value);
   if(!raw){toast('Kein Barcode erkannt');return}
@@ -1151,6 +1206,7 @@ function addIssueScanPosition(a){
   toast('Hinzugefügt: '+a.name);
 }
 function addPosition(){
+  if(denyIfNoPermission(canBook()))return;
   const a=getArticle(posArticle.value), qty=+posQty.value||0; if(!a||qty<=0){toast('Position prüfen');return}
   if(qty>(+a.stock||0)){toast('Nicht genug Bestand');return}
   positions.push({article_id:a.id,article:a.name,qty,serials:posSerial.value.trim()});
@@ -1168,6 +1224,7 @@ function renderPositions(){
   if(total)total.textContent=formatWeight(calculatePositionsWeight(positions));
 }
 async function saveIssue(btn){
+  if(denyIfNoPermission(canBook()))return;
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
   for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
@@ -1221,6 +1278,7 @@ async function saveIssue(btn){
 }
 
 async function cancelIssue(id,btn){
+  if(denyIfNoPermission(isAdmin()))return;
   const issue=state.issues.find(x=>x.id===id);
   if(!issue){toast('Versand nicht gefunden');return}
   if(issue.status==='Storniert'){toast('Versand ist bereits storniert');return}
@@ -1301,6 +1359,7 @@ async function updateIssueRow(id,fields){
 }
 
 function editIssue(id){
+  if(denyIfNoPermission(isAdmin()))return;
   const i=state.issues.find(x=>x.id===id);
   if(!i)return;
   ieId.value=i.id;
@@ -1316,6 +1375,7 @@ function editIssue(id){
 }
 function closeIssueEditModal(){issueEditModal.classList.add('hidden')}
 async function saveIssueEdit(btn){
+  if(denyIfNoPermission(isAdmin()))return;
   const id=ieId.value;
   const i=state.issues.find(x=>x.id===id);
   if(!i){toast('Versand nicht gefunden');return}
@@ -1347,6 +1407,7 @@ async function saveIssueEdit(btn){
 }
 
 async function updateIssueStatus(id,val,sel){
+  if(denyIfNoPermission(canBook())){render();return}
   const i=state.issues.find(x=>x.id===id);
   if(!i)return;
   if(i.status==='Storniert'){toast('Stornierter Versand kann nicht geändert werden');render();return}
@@ -1363,7 +1424,7 @@ async function updateIssueStatus(id,val,sel){
 }
 
 function render(){
-  renderSelects();renderDashboard();renderArticles();renderIssues();renderHistory();renderPositions()
+  applyRoleUI();renderSelects();renderDashboard();renderArticles();renderIssues();renderHistory();renderPositions()
 }
 function renderSelects(){
   const opts=state.articles.map(a=>`<option value="${a.id}">${a.name} | Bestand: ${a.stock||0}</option>`).join('');
@@ -1386,7 +1447,7 @@ function renderArticles(){
     <td>${a.category||'-'}</td><td>${a.barcode||'-'}</td><td>${storageLabel(a)}</td><td>${money(a.ek)}</td><td>${money(a.vk)}</td>
     <td><span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></td>
     <td>${a.dimensions||'-'}</td><td>${(+a.weight||0).toLocaleString('de-DE',{maximumFractionDigits:3})} kg</td><td>${a.note||'-'}</td>
-    <td><button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}',this)">Löschen</button></td>
+    <td>${isAdmin()?`<button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}',this)">Löschen</button>`:'<small class="muted">-</small>'}</td>
   </tr>`).join('');
   articleTable.innerHTML=`<tr><th>Bild</th><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Gewicht</th><th>Notiz</th><th></th></tr>${rows}`;
 }
@@ -1396,14 +1457,14 @@ function renderIssues(){
     <div class="card" style="margin-bottom:10px;background:#131824">
       <div class="row" style="justify-content:space-between">
         <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">${i.tracking_label||i.tracking_code||'Tracking öffnen'}</a>`:(i.tracking_label||i.tracking_code||'-')}</small></div>
-        <select style="width:auto" ${i.status==='Storniert'?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value,this)">
+        <select style="width:auto" ${(i.status==='Storniert'||!canBook())?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value,this)">
           ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
       <p><span class="status ${i.status}">${i.status}</span> · Zielort: ${i.destination||'-'}<br><small>${i.address||''}</small><br>${i.offer?`<small>Angebot: ${i.offer}</small><br>`:''}<b>Gesamtgewicht:</b> ${formatWeight(i.total_weight || calculatePositionsWeight(i.positions))}</p>
       <ul>${i.positions.map(p=>`<li>${p.qty} × ${p.article}${p.serials?' · SN: '+p.serials:''}</li>`).join('')}</ul>
       <div class="row">
-        ${i.status!=='Storniert'?`<button class="secondary" onclick="editIssue('${i.id}')">Bearbeiten</button> <button class="danger" onclick="cancelIssue('${i.id}',this)">Versand stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`}
+        ${isAdmin()?(i.status!=='Storniert'?`<button class="secondary" onclick="editIssue('${i.id}')">Bearbeiten</button> <button class="danger" onclick="cancelIssue('${i.id}',this)">Versand stornieren</button>`:`<span class="badge low">Bestand zurückgebucht</span>`):''}
       </div>
     </div>`).join('');
   issueList.innerHTML=items||'<small class="muted">Noch kein Versand.</small>';
