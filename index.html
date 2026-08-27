@@ -221,9 +221,10 @@ window.addEventListener('error', function(e){
         </div>
         <div class="col-6">
           <label>Vorschau</label>
-          <div class="position-box" style="display:flex;align-items:center;justify-content:center;min-height:76px">
+          <div class="position-box" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:76px;gap:8px">
             <img id="aImagePreview" class="hidden" style="max-width:100%;max-height:120px;border-radius:8px">
             <small id="aImagePreviewEmpty" class="muted">Kein Bild</small>
+            <button id="btnRemoveArticleImage" type="button" class="danger hidden" onclick="removeArticleImage()">Bild entfernen</button>
           </div>
         </div>
       </div>
@@ -1008,20 +1009,31 @@ function calculatePositionsWeight(posList){
 
 
 let pendingArticleImageFile=null;
+let pendingImageRemoval=false;
 const ARTICLE_IMAGE_BUCKET='artikelbilder';
 function onArticleImageChange(input){
   const file=input.files?.[0];
   pendingArticleImageFile=file||null;
+  pendingImageRemoval=false;
   if(!file)return;
   const reader=new FileReader();
   reader.onload=()=>showArticleImagePreview(reader.result);
   reader.readAsDataURL(file);
 }
+function removeArticleImage(){
+  pendingArticleImageFile=null;
+  pendingImageRemoval=true;
+  aImageFile.value='';
+  aImageUrl.value='';
+  showArticleImagePreview('');
+  toast('Bild wird beim Speichern entfernt');
+}
 function showArticleImagePreview(url){
   const img=document.getElementById('aImagePreview');
   const empty=document.getElementById('aImagePreviewEmpty');
-  if(url){img.src=url;img.classList.remove('hidden');empty?.classList.add('hidden')}
-  else{img.classList.add('hidden');img.src='';empty?.classList.remove('hidden')}
+  const removeBtn=document.getElementById('btnRemoveArticleImage');
+  if(url){img.src=url;img.classList.remove('hidden');empty?.classList.add('hidden');removeBtn?.classList.remove('hidden')}
+  else{img.classList.add('hidden');img.src='';empty?.classList.remove('hidden');removeBtn?.classList.add('hidden')}
 }
 function fileToBase64(file){
   return new Promise((resolve,reject)=>{
@@ -1031,7 +1043,20 @@ function fileToBase64(file){
     reader.readAsDataURL(file);
   });
 }
+async function removeStorageImage(articleId){
+  if(!sb)return;
+  try{
+    const {data,error}=await sb.storage.from(ARTICLE_IMAGE_BUCKET).list('',{search:articleId});
+    if(error||!data)return;
+    const matches=data.filter(f=>f.name.startsWith(articleId+'.'));
+    if(matches.length)await sb.storage.from(ARTICLE_IMAGE_BUCKET).remove(matches.map(f=>f.name));
+  }catch(e){}
+}
 async function resolveArticleImageUrl(articleId,existingUrl){
+  if(pendingImageRemoval){
+    await removeStorageImage(articleId);
+    return '';
+  }
   if(!pendingArticleImageFile)return existingUrl||'';
   const file=pendingArticleImageFile;
   if(sb){
@@ -1107,7 +1132,7 @@ async function saveArticle(btn){
     resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
   } finally { setLoading(btn,false); }
 }
-function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';pendingArticleImageFile=null;aImageFile.value='';aImageUrl.value=a.image_url||'';showArticleImagePreview(a.image_url||'');articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
+function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';pendingArticleImageFile=null;pendingImageRemoval=false;aImageFile.value='';aImageUrl.value=a.image_url||'';showArticleImagePreview(a.image_url||'');articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
 async function deleteArticle(id,btn){
   if(denyIfNoPermission(isAdmin()))return;
   if(!confirm('Artikel wirklich löschen?'))return;
@@ -1122,7 +1147,7 @@ async function deleteArticle(id,btn){
     }
   } finally { setLoading(btn,false); }
 }
-function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment','aImageUrl'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;pendingArticleImageFile=null;aImageFile.value='';showArticleImagePreview('');articleFormTitle.textContent='Artikel anlegen'}
+function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment','aImageUrl'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;pendingArticleImageFile=null;pendingImageRemoval=false;aImageFile.value='';showArticleImagePreview('');articleFormTitle.textContent='Artikel anlegen'}
 
 async function bookIncoming(btn){
   if(denyIfNoPermission(canBook()))return;
