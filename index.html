@@ -211,6 +211,18 @@ window.addEventListener('error', function(e){
         <div class="col-6"><label>Maße</label><input id="aDimensions" placeholder="L x B x H"></div>
         <div class="col-6"><label>Gewicht pro Stück (kg)</label><input id="aWeight" type="number" min="0" step="0.001" placeholder="z. B. 12,5"></div>
         <div class="col-12"><label>Notiz / Lieferant / sonstiges</label><textarea id="aNote"></textarea></div>
+        <div class="col-6">
+          <label>Produktbild</label>
+          <input id="aImageFile" type="file" accept="image/*" onchange="onArticleImageChange(this)">
+          <input id="aImageUrl" type="hidden">
+        </div>
+        <div class="col-6">
+          <label>Vorschau</label>
+          <div class="position-box" style="display:flex;align-items:center;justify-content:center;min-height:76px">
+            <img id="aImagePreview" class="hidden" style="max-width:100%;max-height:120px;border-radius:8px">
+            <small id="aImagePreviewEmpty" class="muted">Kein Bild</small>
+          </div>
+        </div>
       </div>
       <div class="row" style="margin-top:10px">
         <button onclick="saveArticle(this)">Speichern</button>
@@ -446,6 +458,7 @@ function renderScanResult(a,raw=''){
   }
   box.innerHTML=`
     <div class="position-box">
+      ${a.image_url?`<img src="${a.image_url}" alt="" style="max-width:160px;max-height:160px;border-radius:10px;border:1px solid var(--line);margin-bottom:10px">`:''}
       <h3 style="margin-top:0">${a.name}</h3>
       <p><span class="badge">${a.category||'Ohne Kategorie'}</span> <span class="badge">${storageLabel(a)}</span></p>
       <p><b>Barcode:</b> ${a.barcode||'-'}<br>
@@ -705,7 +718,7 @@ function cleanArticleForDb(a){
   return {
     id:a.id,name:a.name||'',brand:a.brand||'',model:a.model||'',barcode:a.barcode||'',category:a.category||'',
     ek:+a.ek||0,vk:+a.vk||0,stock:+a.stock||0,min_stock:+a.min||0,
-    dimensions:a.dimensions||'',weight:+a.weight||0,note:a.note||'',storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',updated_at:now()
+    dimensions:a.dimensions||'',weight:+a.weight||0,note:a.note||'',storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',image_url:a.image_url||'',updated_at:now()
   };
 }
 
@@ -713,7 +726,7 @@ function articleFromDb(a){
   return {
     id:a.id,name:a.name,brand:a.brand,model:a.model,barcode:a.barcode||loadBarcodeMap()[a.id]||'',category:a.category,
     ek:+a.ek||0,vk:+a.vk||0,stock:+a.stock||0,min:+a.min_stock||0,
-    dimensions:a.dimensions,weight:+a.weight||0,note:a.note,storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',updated_at:a.updated_at
+    dimensions:a.dimensions,weight:+a.weight||0,note:a.note,storage_location:a.storage_location||'Regal',shelf:a.shelf||'',shelf_compartment:a.shelf_compartment||'',image_url:a.image_url||'',updated_at:a.updated_at
   };
 }
 
@@ -922,6 +935,43 @@ function calculatePositionsWeight(posList){
 }
 
 
+let pendingArticleImageFile=null;
+const ARTICLE_IMAGE_BUCKET='artikelbilder';
+function onArticleImageChange(input){
+  const file=input.files?.[0];
+  pendingArticleImageFile=file||null;
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=()=>showArticleImagePreview(reader.result);
+  reader.readAsDataURL(file);
+}
+function showArticleImagePreview(url){
+  const img=document.getElementById('aImagePreview');
+  const empty=document.getElementById('aImagePreviewEmpty');
+  if(url){img.src=url;img.classList.remove('hidden');empty?.classList.add('hidden')}
+  else{img.classList.add('hidden');img.src='';empty?.classList.remove('hidden')}
+}
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function resolveArticleImageUrl(articleId,existingUrl){
+  if(!pendingArticleImageFile)return existingUrl||'';
+  const file=pendingArticleImageFile;
+  if(sb){
+    const ext=(file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'')||'jpg';
+    const path=articleId+'.'+ext;
+    const {error}=await sb.storage.from(ARTICLE_IMAGE_BUCKET).upload(path,file,{upsert:true,cacheControl:'3600'});
+    if(error)throw error;
+    const {data}=sb.storage.from(ARTICLE_IMAGE_BUCKET).getPublicUrl(path);
+    return data.publicUrl+'?t='+Date.now();
+  }
+  return await fileToBase64(file);
+}
 function openArticleModal(){resetArticleForm();articleModal.classList.remove('hidden')}
 function calcVK(){
   const ek=Number(aEK.value)||0;
@@ -948,10 +998,16 @@ function storageLabel(a){
 }
 function closeArticleModal(){articleModal.classList.add('hidden')}
 async function saveArticle(btn){
-  const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.3).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),updated_at:now()};
+  const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.3).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),image_url:aImageUrl.value||'',updated_at:now()};
   if(!obj.name){toast('Name fehlt');return}
   setLoading(btn,true);
   try{
+    try{
+      obj.image_url=await resolveArticleImageUrl(obj.id,obj.image_url);
+    }catch(e){
+      toast('Bild-Upload fehlgeschlagen: '+(e.message||e));
+      return;
+    }
     if(sb){
       let {error}=await sb.from('lager_articles').upsert(cleanArticleForDb(obj));
       if(error && String(error.message||'').toLowerCase().includes('barcode')){
@@ -959,6 +1015,12 @@ async function saveArticle(btn){
         const retry=await sb.from('lager_articles').upsert(fallback);
         error=retry.error;
         if(!error)toast('Artikel gespeichert. Für Cloud-Barcodes bitte die SQL-Migration ausführen.');
+      }
+      if(error && String(error.message||'').toLowerCase().includes('image_url')){
+        const fallback=cleanArticleForDb(obj); delete fallback.image_url;
+        const retry=await sb.from('lager_articles').upsert(fallback);
+        error=retry.error;
+        if(!error)toast('Artikel gespeichert. Für Cloud-Bilder bitte die Spalte image_url in lager_articles anlegen.');
       }
       if(error){toast('Supabase Fehler: '+error.message);return}
       const map=loadBarcodeMap(); if(obj.barcode)map[obj.id]=obj.barcode; else delete map[obj.id];
@@ -972,7 +1034,7 @@ async function saveArticle(btn){
     resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
   } finally { setLoading(btn,false); }
 }
-function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
+function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';pendingArticleImageFile=null;aImageFile.value='';aImageUrl.value=a.image_url||'';showArticleImagePreview(a.image_url||'');articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
 async function deleteArticle(id,btn){
   if(!confirm('Artikel wirklich löschen?'))return;
   setLoading(btn,true);
@@ -986,7 +1048,7 @@ async function deleteArticle(id,btn){
     }
   } finally { setLoading(btn,false); }
 }
-function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;articleFormTitle.textContent='Artikel anlegen'}
+function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment','aImageUrl'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;pendingArticleImageFile=null;aImageFile.value='';showArticleImagePreview('');articleFormTitle.textContent='Artikel anlegen'}
 
 async function bookIncoming(btn){
   const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
@@ -1360,13 +1422,14 @@ function renderDashboard(){
 function renderArticles(){
   const q=(articleSearch?.value||'').toLowerCase();
   const rows=state.articles.filter(a=>JSON.stringify(a).toLowerCase().includes(q)).map(a=>`<tr>
+    <td>${a.image_url?`<img src="${a.image_url}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`:'<small class="muted">-</small>'}</td>
     <td><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''}</small></td>
     <td>${a.category||'-'}</td><td>${a.barcode||'-'}</td><td>${storageLabel(a)}</td><td>${money(a.ek)}</td><td>${money(a.vk)}</td>
     <td><span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></td>
     <td>${a.dimensions||'-'}</td><td>${(+a.weight||0).toLocaleString('de-DE',{maximumFractionDigits:3})} kg</td><td>${a.note||'-'}</td>
     <td><button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}',this)">Löschen</button></td>
   </tr>`).join('');
-  articleTable.innerHTML=`<tr><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Gewicht</th><th>Notiz</th><th></th></tr>${rows}`;
+  articleTable.innerHTML=`<tr><th>Bild</th><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Gewicht</th><th>Notiz</th><th></th></tr>${rows}`;
 }
 function renderIssues(){
   const q=(issueSearch?.value||'').toLowerCase();
