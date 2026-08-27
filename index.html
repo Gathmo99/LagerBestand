@@ -367,6 +367,7 @@ window.addEventListener('error', function(e){
         <button class="secondary" onclick="exportCSV('articles')">Artikel CSV</button>
         <button class="secondary" onclick="exportCSV('history')">Historie CSV</button>
         <button class="blue" onclick="exportExcel()">📊 Komplett-Export (Excel)</button>
+        <button id="btnClearHistory" class="danger hidden" onclick="clearHistoryAndIssues(this)">🗑️ Historie &amp; Versand leeren</button>
       </div>
       <div style="overflow:auto;margin-top:10px"><table id="historyTable"></table></div>
     </div>
@@ -438,6 +439,8 @@ function applyRoleUI(){
   if(issueScanInput)issueScanInput.disabled=!book;
   const usersTabBtn=document.getElementById('tabBtnUsers');
   if(usersTabBtn)usersTabBtn.classList.toggle('hidden',!admin);
+  const clearHistoryBtn=document.getElementById('btnClearHistory');
+  if(clearHistoryBtn)clearHistoryBtn.classList.toggle('hidden',!admin);
 }
 let scannedArticleId=null;
 let cameraStream=null;
@@ -1482,6 +1485,29 @@ async function updateIssueStatus(id,val,sel){
   } finally { setLoading(sel,false); }
 }
 
+async function clearHistoryAndIssues(btn){
+  if(denyIfNoPermission(isAdmin()))return;
+  if(!confirm('Wirklich die komplette Historie und alle Versand-Vorgänge unwiderruflich löschen? Artikel und Bestände bleiben unverändert. Tipp: vorher Excel-Export machen.'))return;
+  const typed=prompt('Zur Bestätigung "LÖSCHEN" eintippen:');
+  if(typed!=='LÖSCHEN'){toast('Abgebrochen');return}
+  setLoading(btn,true);
+  try{
+    if(sb){
+      const {error:ePos}=await sb.from('lager_issue_positions').delete().not('id','is',null);
+      if(ePos){toast('Supabase Fehler: '+ePos.message);return}
+      const {error:eIssues}=await sb.from('lager_issues').delete().not('id','is',null);
+      if(eIssues){toast('Supabase Fehler: '+eIssues.message);return}
+      const {error:eHist}=await sb.from('lager_history').delete().not('id','is',null);
+      if(eHist){toast('Supabase Fehler: '+eHist.message);return}
+      await syncDown();
+    } else {
+      state.issues=[];
+      state.history=[];
+      persist();
+    }
+    toast('Historie und Versand-Verlauf geleert');
+  } finally { setLoading(btn,false); }
+}
 async function loadUsers(){
   if(denyIfNoPermission(isAdmin()))return;
   const table=document.getElementById('usersTable');
