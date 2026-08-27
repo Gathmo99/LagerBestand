@@ -72,7 +72,7 @@ window.addEventListener('error', function(e){
 <div id="loginScreen" class="login-screen hidden">
   <div class="card login-box">
     <h1>📦 Lagerverwaltung Login</h1>
-    <p class="muted">Melde dich mit deinem Zugang an. Danach öffnet sich das interne Lager.</p>
+    <p class="muted">Melde dich an oder registriere dich. Danach öffnet sich das interne Lager.</p>
 
     <div id="loginMode">
       <label>E-Mail</label>
@@ -81,8 +81,22 @@ window.addEventListener('error', function(e){
       <input id="authPassword" type="password" autocomplete="current-password" placeholder="Passwort">
       <div class="row" style="margin-top:12px">
         <button onclick="login(this)">Login</button>
+        <button class="secondary" onclick="showRegister()">Registrieren</button>
       </div>
       <button class="secondary" style="margin-top:10px;width:100%" onclick="resetPassword(this)">Passwort vergessen</button>
+    </div>
+
+    <div id="registerMode" class="hidden">
+      <label>Name</label>
+      <input id="authName" autocomplete="name" placeholder="Jan">
+      <label>E-Mail</label>
+      <input id="regEmail" type="email" autocomplete="email" placeholder="name@firma.de">
+      <label>Passwort</label>
+      <input id="regPassword" type="password" autocomplete="new-password" placeholder="Mindestens 6 Zeichen">
+      <div class="row" style="margin-top:12px">
+        <button onclick="register(this)">Account erstellen</button>
+        <button class="secondary" onclick="showLogin()">Zurück zum Login</button>
+      </div>
     </div>
 
     <hr>
@@ -643,6 +657,16 @@ function showLoginScreen(){
   if(window.currentUserBadge) currentUserBadge.textContent='Nicht angemeldet';
 }
 
+function showRegister(){
+  loginMode.classList.add('hidden');
+  registerMode.classList.remove('hidden');
+}
+
+function showLogin(){
+  registerMode.classList.add('hidden');
+  loginMode.classList.remove('hidden');
+}
+
 function enterLocalMode(){
   user={email:'Lokaler Testmodus',user_metadata:{name:'Lokaler Testmodus'}};
   sb=null;
@@ -698,6 +722,25 @@ async function login(btn){
     await syncDown();
     await fetchUserRole();
     subscribeRealtime();
+  } finally { setLoading(btn,false); }
+}
+
+async function register(btn){
+  if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
+  const name=authName.value.trim();
+  const email=regEmail.value.trim();
+  const password=regPassword.value;
+  if(!name || !email || !password){toast('Name, E-Mail und Passwort ausfüllen.');return;}
+  setLoading(btn,true);
+  try{
+    const {data,error}=await sb.auth.signUp({email,password,options:{data:{name}}});
+    if(error){toast(error.message);return;}
+    if(data?.user){
+      await sb.from('lager_profiles').upsert({id:data.user.id,email,name,role:ROLE_STAFF});
+    }
+    toast('Registriert. Falls E-Mail-Bestätigung aktiv ist, bitte bestätigen und danach einloggen.');
+    authEmail.value=email;
+    showLogin();
   } finally { setLoading(btn,false); }
 }
 
