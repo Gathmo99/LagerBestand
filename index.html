@@ -427,7 +427,7 @@ function applyRoleUI(){
   if(badge){badge.textContent='Rolle: '+roleLabel();badge.classList.remove('hidden')}
   const admin=isAdmin(), book=canBook();
   const addArticleBtn=document.getElementById('btnAddArticle');
-  if(addArticleBtn)addArticleBtn.classList.toggle('hidden',!admin);
+  if(addArticleBtn)addArticleBtn.classList.toggle('hidden',!book);
   const bookIncomingBtn=document.getElementById('btnBookIncoming');
   if(bookIncomingBtn){bookIncomingBtn.disabled=!book}
   const addPosBtn=document.getElementById('btnAddPosition');
@@ -530,7 +530,7 @@ function renderScanResult(a,raw=''){
         <button onclick="scannerStockChange(1,this)">+1 einlagern</button>
         <button class="warn" onclick="scannerStockChange(-1,this)">−1 auslagern</button>
         <button class="blue" onclick="addScannedToIssue()">Zum Versand hinzufügen</button>`:''}
-        ${isAdmin()?`<button class="secondary" onclick="editArticle('${a.id}')">Artikel bearbeiten</button>`:''}
+        ${canBook()?`<button class="secondary" onclick="editArticle('${a.id}')">Artikel bearbeiten</button>`:''}
       </div>
     </div>`;
 }
@@ -1067,7 +1067,7 @@ function storageLabel(a){
 }
 function closeArticleModal(){articleModal.classList.add('hidden')}
 async function saveArticle(btn){
-  if(denyIfNoPermission(isAdmin()))return;
+  if(denyIfNoPermission(canBook()))return;
   const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.4).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),image_url:aImageUrl.value||'',updated_at:now()};
   if(!obj.name){toast('Name fehlt');return}
   setLoading(btn,true);
@@ -1544,7 +1544,7 @@ function renderArticles(){
     <td>${a.category||'-'}</td><td>${a.barcode||'-'}</td><td>${storageLabel(a)}</td><td>${money(a.ek)}</td><td>${money(a.vk)}</td>
     <td><span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></td>
     <td>${a.dimensions||'-'}</td><td>${(+a.weight||0).toLocaleString('de-DE',{maximumFractionDigits:3})} kg</td><td>${a.note||'-'}</td>
-    <td>${isAdmin()?`<button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button> <button class="danger" onclick="deleteArticle('${a.id}',this)">Löschen</button>`:'<small class="muted">-</small>'}</td>
+    <td>${canBook()?`<button class="secondary" onclick="editArticle('${a.id}')">Bearbeiten</button>`:''} ${isAdmin()?`<button class="danger" onclick="deleteArticle('${a.id}',this)">Löschen</button>`:''}${!canBook()&&!isAdmin()?'<small class="muted">-</small>':''}</td>
   </tr>`).join('');
   articleTable.innerHTML=`<tr><th>Bild</th><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Gewicht</th><th>Notiz</th><th></th></tr>${rows}`;
 }
