@@ -131,6 +131,7 @@ window.addEventListener('error', function(e){
     <button class="tab" onclick="showTab('incoming',this)">Wareneingang</button>
     <button class="tab" onclick="showTab('issues',this)">Versand</button>
     <button class="tab" onclick="showTab('history',this)">Historie</button>
+    <button id="tabBtnUsers" class="tab hidden" onclick="showTab('users',this)">Benutzer</button>
   </div>
 
   <section id="dashboard" class="view">
@@ -370,6 +371,19 @@ window.addEventListener('error', function(e){
       <div style="overflow:auto;margin-top:10px"><table id="historyTable"></table></div>
     </div>
   </section>
+
+  <section id="users" class="view hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <div>
+          <h2 style="margin:0">👤 Benutzerverwaltung</h2>
+          <small>Rollen der Nutzer verwalten. Neue Accounts weiterhin per Registrierung oder im Supabase-Dashboard anlegen.</small>
+        </div>
+        <button class="secondary" onclick="loadUsers()">Aktualisieren</button>
+      </div>
+      <div style="overflow:auto"><table id="usersTable"></table></div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -422,6 +436,8 @@ function applyRoleUI(){
   if(saveIssueBtn)saveIssueBtn.disabled=!book;
   const issueScanInput=document.getElementById('issueScanInput');
   if(issueScanInput)issueScanInput.disabled=!book;
+  const usersTabBtn=document.getElementById('tabBtnUsers');
+  if(usersTabBtn)usersTabBtn.classList.toggle('hidden',!admin);
 }
 let scannedArticleId=null;
 let cameraStream=null;
@@ -974,7 +990,7 @@ function subscribeRealtime(){
     .subscribe();
 }
 
-function showTab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');render();if(id==='scanner')setTimeout(focusScanner,50);else stopCameraScanner()}
+function showTab(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));btn.classList.add('active');render();if(id==='scanner')setTimeout(focusScanner,50);else stopCameraScanner();if(id==='users')loadUsers()}
 function getArticle(id){return state.articles.find(a=>a.id===id)}
 function articleName(id){const a=getArticle(id);return a?`${a.name} ${a.brand? '('+a.brand+')':''}`:'Gelöschter Artikel'}
 function formatWeight(n){
@@ -1463,6 +1479,44 @@ async function updateIssueStatus(id,val,sel){
     } else {
       i.status=val;persist();
     }
+  } finally { setLoading(sel,false); }
+}
+
+async function loadUsers(){
+  if(denyIfNoPermission(isAdmin()))return;
+  const table=document.getElementById('usersTable');
+  if(!table)return;
+  if(!sb){table.innerHTML='<tr><td>Benutzerverwaltung erfordert Cloud-Verbindung.</td></tr>';return}
+  table.innerHTML='<tr><td>Lade ...</td></tr>';
+  const {data,error}=await sb.from('lager_profiles').select('*').order('email');
+  if(error){table.innerHTML=`<tr><td>Fehler: ${error.message}</td></tr>`;return}
+  const rows=(data||[]).map(p=>`<tr>
+    <td>${p.name||'-'}</td>
+    <td>${p.email||'-'}</td>
+    <td>
+      <select onchange="updateUserRole('${p.id}',this.value,this)">
+        <option value="admin" ${p.role==='admin'?'selected':''}>Admin</option>
+        <option value="mitarbeiter" ${p.role==='mitarbeiter'?'selected':''}>Mitarbeiter</option>
+        <option value="viewer" ${p.role==='viewer'?'selected':''}>Nur Ansicht</option>
+      </select>
+    </td>
+    <td>${p.id===user?.id?'<span class="badge">Du</span>':''}</td>
+  </tr>`).join('');
+  table.innerHTML=`<tr><th>Name</th><th>E-Mail</th><th>Rolle</th><th></th></tr>${rows||'<tr><td colspan="4">Keine Nutzer gefunden.</td></tr>'}`;
+}
+async function updateUserRole(id,role,sel){
+  if(denyIfNoPermission(isAdmin()))return;
+  if(id===user?.id && role!=='admin' && !confirm('Du entziehst dir selbst die Admin-Rolle. Fortfahren?')){
+    loadUsers();
+    return;
+  }
+  setLoading(sel,true);
+  try{
+    const {error}=await sb.from('lager_profiles').update({role}).eq('id',id);
+    if(error){toast('Supabase Fehler: '+error.message);loadUsers();return}
+    toast('Rolle aktualisiert');
+    if(id===user?.id)await fetchUserRole();
+    await loadUsers();
   } finally { setLoading(sel,false); }
 }
 
