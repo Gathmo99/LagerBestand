@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Lagerverwaltung Intern</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{
   --bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--text:#f2f4f8;--muted:#9ba3b4;
@@ -349,6 +350,7 @@ window.addEventListener('error', function(e){
         <input id="historySearch" oninput="render()" placeholder="Suche Artikel, Kunde, Seriennummer, Tracking ..." style="flex:1">
         <button class="secondary" onclick="exportCSV('articles')">Artikel CSV</button>
         <button class="secondary" onclick="exportCSV('history')">Historie CSV</button>
+        <button class="blue" onclick="exportExcel()">📊 Komplett-Export (Excel)</button>
       </div>
       <div style="overflow:auto;margin-top:10px"><table id="historyTable"></table></div>
     </div>
@@ -1423,6 +1425,91 @@ function exportCSV(type){
 }
 function exportAll(){download('lager-backup.json',JSON.stringify(state,null,2),'application/json')}
 function download(name,content,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;a.click()}
+
+function sheetFromRows(header,rows,widths){
+  const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
+  ws['!cols']=widths.map(w=>({wch:w}));
+  ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:rows.length,c:header.length-1}})};
+  ws['!freeze']={xSplit:0,ySplit:1};
+  return ws;
+}
+function buildArticlesRows(){
+  return [...state.articles]
+    .sort((a,b)=>(a.category||'').localeCompare(b.category||'','de')||(a.name||'').localeCompare(b.name||'','de'))
+    .map(a=>[
+      a.category||'-',a.name||'',a.brand||'',a.model||'',a.barcode||'',
+      storageLabel(a),+a.ek||0,+a.vk||0,+a.stock||0,+a.min||0,
+      a.dimensions||'',+a.weight||0,a.note||''
+    ]);
+}
+function buildIssuesRows(){
+  return [...state.issues]
+    .sort((a,b)=>new Date(b.date)-new Date(a.date))
+    .map(i=>[
+      i.number||'',todayText(i.date),i.status||'',i.customer||'',i.project||'',
+      i.destination||'',i.address||'',i.offer||'',
+      (i.positions||[]).map(p=>`${p.qty} × ${p.article}`).join('; '),
+      +i.total_weight||calculatePositionsWeight(i.positions)||0,
+      i.tracking_link||i.tracking_code||'',i.purpose||'',i.user||''
+    ]);
+}
+function buildIssuePositionsRows(){
+  const rows=[];
+  [...state.issues].sort((a,b)=>new Date(b.date)-new Date(a.date)).forEach(i=>{
+    (i.positions||[]).forEach(p=>{
+      rows.push([i.number||'',todayText(i.date),i.customer||'',p.article||'',+p.qty||0,p.serials||'']);
+    });
+  });
+  return rows;
+}
+function buildHistoryRows(){
+  return [...state.history]
+    .sort((a,b)=>new Date(b.date)-new Date(a.date))
+    .map(h=>[
+      todayText(h.date),h.type||'',h.article||'',+h.qty||0,h.user||'',
+      h.customer||'',h.project||'',h.serials||'',h.tracking_code||'',h.comment||''
+    ]);
+}
+function buildOverviewRows(){
+  const stockSum=state.articles.reduce((s,a)=>s+(+a.stock||0),0);
+  const ekSum=state.articles.reduce((s,a)=>s+(+a.stock||0)*(+a.ek||0),0);
+  const vkSum=state.articles.reduce((s,a)=>s+(+a.stock||0)*(+a.vk||0),0);
+  const lows=state.articles.filter(a=>(+a.min||0)>0 && (+a.stock||0)<=+a.min);
+  return [
+    ['Export erstellt am',todayText(now())],
+    ['Anzahl Artikel',state.articles.length],
+    ['Gesamtbestand (Stück)',stockSum],
+    ['Lagerwert EK (€)',+ekSum.toFixed(2)],
+    ['Lagerwert VK (€)',+vkSum.toFixed(2)],
+    ['Artikel unter Mindestbestand',lows.length],
+    ['Anzahl Versand-Vorgänge',state.issues.length],
+    ['Anzahl Historien-Einträge',state.history.length]
+  ];
+}
+function exportExcel(){
+  if(typeof XLSX==='undefined'){toast('Excel-Bibliothek konnte nicht geladen werden');return}
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,sheetFromRows(['Kennzahl','Wert'],buildOverviewRows(),[28,18]),'Übersicht');
+  XLSX.utils.book_append_sheet(wb,sheetFromRows(
+    ['Kategorie','Name','Marke','Modell','Barcode','Lagerort','EK (€)','VK (€)','Bestand','Mindestbestand','Maße','Gewicht (kg)','Notiz'],
+    buildArticlesRows(),[16,26,16,16,18,16,10,10,10,12,16,12,30]
+  ),'Artikel');
+  XLSX.utils.book_append_sheet(wb,sheetFromRows(
+    ['Nummer','Datum','Status','Kunde','Projekt','Zielort','Adresse','Angebotsnummer','Positionen','Gesamtgewicht (kg)','Tracking','Verwendungszweck','Ersteller'],
+    buildIssuesRows(),[16,18,14,20,16,20,26,16,40,16,26,30,16]
+  ),'Versand');
+  XLSX.utils.book_append_sheet(wb,sheetFromRows(
+    ['Versand-Nr.','Datum','Kunde','Artikel','Menge','Seriennummer'],
+    buildIssuePositionsRows(),[16,18,20,26,8,20]
+  ),'Versand-Positionen');
+  XLSX.utils.book_append_sheet(wb,sheetFromRows(
+    ['Datum','Aktion','Artikel','Menge','Benutzer','Kunde','Projekt','Seriennummer','Tracking','Kommentar'],
+    buildHistoryRows(),[18,16,26,8,16,20,16,20,20,30]
+  ),'Historie');
+  const stamp=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`Lagerverwaltung-Export-${stamp}.xlsx`);
+  toast('Excel-Export erstellt');
+}
 
 
 loadLocal();initSupabase();render();
