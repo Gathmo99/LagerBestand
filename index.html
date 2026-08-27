@@ -323,6 +323,7 @@ window.addEventListener('error', function(e){
         <h3>Positionen</h3>
         <label>Barcode scannen (fügt direkt eine Position hinzu)</label>
         <input id="issueScanInput" autocomplete="off" inputmode="none" placeholder="Barcode scannen ..." onkeydown="handleIssueScanKey(event)">
+        <div id="issueScanChoice"></div>
         <hr>
         <div class="grid">
           <div class="col-6"><label>Artikel</label><select id="posArticle"></select></div>
@@ -379,13 +380,16 @@ function saveBarcodeMap(){
   localStorage.setItem(BARCODE_KEY,JSON.stringify(map));
 }
 function normalizeBarcode(v){return String(v||'').trim().replace(/\s+/g,'')}
-function findArticleByBarcode(code){
+function findArticlesByBarcode(code){
   const n=normalizeBarcode(code).toLowerCase();
-  if(!n)return null;
-  return state.articles.find(a=>
+  if(!n)return [];
+  return state.articles.filter(a=>
     normalizeBarcode(a.barcode).toLowerCase()===n ||
     normalizeBarcode(a.model).toLowerCase()===n
-  ) || null;
+  );
+}
+function findArticleByBarcode(code){
+  return findArticlesByBarcode(code)[0]||null;
 }
 function focusScanner(){
   const el=document.getElementById('scanInput');
@@ -401,11 +405,37 @@ function processScan(code){
   if(input)input.value='';
   const last=document.getElementById('lastScanValue');
   if(last)last.textContent=raw;
-  const article=findArticleByBarcode(raw);
+  const matches=findArticlesByBarcode(raw);
+  if(matches.length>1){
+    scannedArticleId=null;
+    renderScanChoices(matches,raw);
+    toast(matches.length+' Artikel zu diesem Barcode gefunden – bitte auswählen');
+    return;
+  }
+  const article=matches[0]||null;
   scannedArticleId=article?.id||null;
   renderScanResult(article,raw);
   if(article)toast('Artikel gefunden: '+article.name);
   else toast('Kein Artikel zu diesem Barcode gefunden');
+}
+function renderScanChoices(matches,raw){
+  const box=document.getElementById('scanResult');
+  if(!box)return;
+  box.innerHTML=`
+    <div class="position-box">
+      <b>Mehrere Artikel zu diesem Barcode</b><br><small>Code: ${raw||'-'} · bitte den passenden Artikel wählen</small>
+      ${matches.map(a=>`
+        <div class="row" style="justify-content:space-between;margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+          <div><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''} · Bestand: ${a.stock||0}</small></div>
+          <button onclick="selectScannedArticle('${a.id}','${String(raw||'').replaceAll("'","&#39;")}')">Auswählen</button>
+        </div>`).join('')}
+    </div>`;
+}
+function selectScannedArticle(articleId,raw){
+  const a=getArticle(articleId);
+  scannedArticleId=a?.id||null;
+  renderScanResult(a,raw);
+  if(a)toast('Ausgewählt: '+a.name);
 }
 function renderScanResult(a,raw=''){
   const box=document.getElementById('scanResult');
@@ -919,10 +949,6 @@ function storageLabel(a){
 function closeArticleModal(){articleModal.classList.add('hidden')}
 async function saveArticle(btn){
   const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.3).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),updated_at:now()};
-  if(obj.barcode){
-    const duplicate=state.articles.find(a=>a.id!==obj.id && normalizeBarcode(a.barcode).toLowerCase()===obj.barcode.toLowerCase());
-    if(duplicate){toast('Barcode ist bereits bei „'+duplicate.name+'“ hinterlegt');return}
-  }
   if(!obj.name){toast('Name fehlt');return}
   setLoading(btn,true);
   try{
@@ -1059,15 +1085,49 @@ function processIssueScan(code){
   const raw=normalizeBarcode(code||input?.value);
   if(!raw){toast('Kein Barcode erkannt');return}
   if(input)input.value='';
-  const a=findArticleByBarcode(raw);
+  const matches=findArticlesByBarcode(raw);
+  if(matches.length>1){
+    renderIssueScanChoices(matches,raw);
+    toast(matches.length+' Artikel zu diesem Barcode gefunden – bitte auswählen');
+    return;
+  }
+  clearIssueScanChoices();
+  const a=matches[0]||null;
   if(!a){toast('Kein Artikel zu diesem Barcode gefunden');input?.focus();return}
-  if((+a.stock||0)<=0){toast('Kein Bestand verfügbar für '+a.name);input?.focus();return}
+  addIssueScanPosition(a);
+  input?.focus();
+}
+function renderIssueScanChoices(matches,raw){
+  const box=document.getElementById('issueScanChoice');
+  if(!box)return;
+  box.innerHTML=`
+    <div class="position-box">
+      <b>Mehrere Artikel zu diesem Barcode</b><br><small>Code: ${raw||'-'} · bitte den passenden Artikel wählen</small>
+      ${matches.map(a=>`
+        <div class="row" style="justify-content:space-between;margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+          <div><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''} · Bestand: ${a.stock||0}</small></div>
+          <button onclick="selectIssueScanArticle('${a.id}')">Auswählen</button>
+        </div>`).join('')}
+    </div>`;
+}
+function clearIssueScanChoices(){
+  const box=document.getElementById('issueScanChoice');
+  if(box)box.innerHTML='';
+}
+function selectIssueScanArticle(articleId){
+  const a=getArticle(articleId);
+  clearIssueScanChoices();
+  if(!a){toast('Artikel nicht gefunden');return}
+  addIssueScanPosition(a);
+  document.getElementById('issueScanInput')?.focus();
+}
+function addIssueScanPosition(a){
+  if((+a.stock||0)<=0){toast('Kein Bestand verfügbar für '+a.name);return}
   const existing=positions.find(p=>p.article_id===a.id);
   if(existing)existing.qty+=1;
   else positions.push({article_id:a.id,article:a.name,qty:1,serials:a.barcode||''});
   renderPositions();
   toast('Hinzugefügt: '+a.name);
-  input?.focus();
 }
 function addPosition(){
   const a=getArticle(posArticle.value), qty=+posQty.value||0; if(!a||qty<=0){toast('Position prüfen');return}
