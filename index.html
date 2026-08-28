@@ -223,7 +223,7 @@ window.addEventListener('error', function(e){
         <div class="col-6">
           <label>Vorschau</label>
           <div class="position-box" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:76px;gap:8px">
-            <img id="aImagePreview" class="hidden" style="max-width:100%;max-height:120px;border-radius:8px">
+            <img id="aImagePreview" class="hidden" style="max-width:100%;max-height:120px;border-radius:8px;cursor:zoom-in" onclick="openImageLightbox(this.src)">
             <small id="aImagePreviewEmpty" class="muted">Kein Bild</small>
             <button id="btnRemoveArticleImage" type="button" class="danger hidden" onclick="removeArticleImage()">Bild entfernen</button>
           </div>
@@ -255,6 +255,10 @@ window.addEventListener('error', function(e){
         <button class="blue" onclick="openIssueMailClient()">E-Mail-Programm öffnen</button>
       </div>
     </div>
+  </div>
+
+  <div id="imageLightbox" class="modal hidden" onclick="closeImageLightbox()">
+    <img id="imageLightboxImg" src="" alt="" style="max-width:92vw;max-height:92vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
   </div>
 
   <div id="issueEditModal" class="modal hidden">
@@ -524,7 +528,7 @@ function renderScanResult(a,raw=''){
   }
   box.innerHTML=`
     <div class="position-box">
-      ${a.image_url?`<img src="${a.image_url}" alt="" style="max-width:160px;max-height:160px;border-radius:10px;border:1px solid var(--line);margin-bottom:10px">`:''}
+      ${a.image_url?`<img src="${a.image_url}" alt="" style="max-width:160px;max-height:160px;border-radius:10px;border:1px solid var(--line);margin-bottom:10px;cursor:zoom-in" onclick="openImageLightbox('${a.image_url}')">`:''}
       <h3 style="margin-top:0">${a.name}</h3>
       <p><span class="badge">${a.category||'Ohne Kategorie'}</span> <span class="badge">${storageLabel(a)}</span></p>
       <p><b>Barcode:</b> ${a.barcode||'-'}<br>
@@ -1069,6 +1073,15 @@ async function resolveArticleImageUrl(articleId,existingUrl){
     return data.publicUrl+'?t='+Date.now();
   }
   return await fileToBase64(file);
+}
+function openImageLightbox(url){
+  if(!url)return;
+  document.getElementById('imageLightboxImg').src=url;
+  document.getElementById('imageLightbox').classList.remove('hidden');
+}
+function closeImageLightbox(){
+  document.getElementById('imageLightbox').classList.add('hidden');
+  document.getElementById('imageLightboxImg').src='';
 }
 function openArticleModal(){resetArticleForm();articleModal.classList.remove('hidden')}
 function calcVK(){
@@ -1681,7 +1694,7 @@ function renderDashboard(){
 function renderArticles(){
   const q=(articleSearch?.value||'').toLowerCase();
   const rows=state.articles.filter(a=>JSON.stringify(a).toLowerCase().includes(q)).map(a=>`<tr>
-    <td>${a.image_url?`<img src="${a.image_url}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">`:'<small class="muted">-</small>'}</td>
+    <td>${a.image_url?`<img src="${a.image_url}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in" onclick="openImageLightbox('${a.image_url}')">`:'<small class="muted">-</small>'}</td>
     <td><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''}</small></td>
     <td>${a.category||'-'}</td><td>${a.barcode||'-'}</td><td>${storageLabel(a)}</td><td>${money(a.ek)}</td><td>${money(a.vk)}</td>
     <td><span class="badge ${(+a.min||0)>0 && (+a.stock||0)<=+a.min?'low':'ok'}">${a.stock||0}</span></td>
