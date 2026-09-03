@@ -1678,27 +1678,22 @@ function printDeliveryNote(issueId){
   y+=8;
 
   doc.setFontSize(10);
-  const leftCol=[
-    ['Datum',todayText(i.date)],
+  const labelWidth=34;
+  const valueWidth=pageWidth-marginX*2-labelWidth;
+  const fields=[
     ['Kunde',i.customer||'-'],
+    ['Zielort',i.destination||'-'],
+    ['Adresse',i.address||'-'],
     ['Projekt',i.project||'-'],
     ['Angebotsnummer',i.offer||'-']
   ];
-  const rightCol=[
-    ['Zielort',i.destination||'-'],
-    ['Adresse',i.address||'-']
-  ];
-  const colY0=y;
-  leftCol.forEach(([label,val],idx)=>{
-    doc.setFont(undefined,'bold');doc.text(label+':',marginX,colY0+idx*6);
-    doc.setFont(undefined,'normal');doc.text(String(val),marginX+34,colY0+idx*6,{maxWidth:pageWidth/2-marginX-6});
+  fields.forEach(([label,val])=>{
+    const lines=doc.splitTextToSize(String(val),valueWidth);
+    doc.setFont(undefined,'bold');doc.text(label+':',marginX,y);
+    doc.setFont(undefined,'normal');doc.text(lines,marginX+labelWidth,y);
+    y+=Math.max(lines.length,1)*5+1;
   });
-  rightCol.forEach(([label,val],idx)=>{
-    const x=pageWidth/2+4;
-    doc.setFont(undefined,'bold');doc.text(label+':',x,colY0+idx*6);
-    doc.setFont(undefined,'normal');doc.text(String(val),x+30,colY0+idx*6,{maxWidth:pageWidth/2-marginX-30});
-  });
-  y=colY0+leftCol.length*6+8;
+  y+=3;
 
   if(i.purpose){
     doc.setFont(undefined,'bold');doc.text('Verwendungszweck:',marginX,y);
@@ -1730,20 +1725,11 @@ function printDeliveryNote(issueId){
 
   doc.setFont(undefined,'bold');
   doc.text('Gesamtgewicht: '+formatWeight(i.total_weight||calculatePositionsWeight(i.positions)),marginX,y);
-  y+=16;
-
-  if(y>250)y=250;
-  doc.setFont(undefined,'normal');
-  doc.setDrawColor(0);
-  doc.line(marginX,y,marginX+70,y);
-  doc.line(pageWidth-marginX-70,y,pageWidth-marginX,y);
-  doc.setFontSize(9);
-  doc.text('Ort, Datum',marginX,y+5);
-  doc.text('Unterschrift Empfänger',pageWidth-marginX-70,y+5);
 
   doc.setFontSize(8);
+  doc.setFont(undefined,'normal');
   doc.setTextColor(150);
-  doc.text('Erstellt von '+(i.user||'-')+' · '+todayText(now()),marginX,290);
+  doc.text('Erstellt von '+(i.user||'-'),marginX,290);
 
   doc.save(`Lieferschein-${(i.number||issueId).replace(/[^a-zA-Z0-9-]/g,'_')}.pdf`);
 }
