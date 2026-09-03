@@ -130,6 +130,7 @@ window.addEventListener('error', function(e){
     <button class="tab" onclick="showTab('articles',this)">Artikel</button>
     <button class="tab" onclick="showTab('scanner',this)">Scanner</button>
     <button class="tab" onclick="showTab('incoming',this)">Wareneingang</button>
+    <button class="tab" onclick="showTab('outgoing',this)">Warenausgang</button>
     <button class="tab" onclick="showTab('issues',this)">Versand</button>
     <button class="tab" onclick="showTab('history',this)">Historie</button>
     <button id="tabBtnUsers" class="tab hidden" onclick="showTab('users',this)">Benutzer</button>
@@ -330,6 +331,29 @@ window.addEventListener('error', function(e){
     </div>
   </section>
 
+  <section id="outgoing" class="view hidden">
+    <div class="card">
+      <h2>📤 Warenausgang buchen</h2>
+      <small class="muted">Für Bestand, der ausgebucht wird ohne Versand (Verbrauch, Defekt, Test, Umbau ...). Mehrere Artikel können gesammelt mit einem gemeinsamen Grund ausgebucht werden.</small>
+      <hr>
+      <label>Barcode scannen (fügt direkt eine Position hinzu)</label>
+      <input id="outScanInput" autocomplete="off" inputmode="none" placeholder="Barcode scannen ..." onkeydown="handleOutgoingScanKey(event)">
+      <div id="outScanChoice"></div>
+      <hr>
+      <div class="grid">
+        <div class="col-6"><label>Artikel</label><select id="outArticle"></select></div>
+        <div class="col-3"><label>Menge</label><input id="outQty" type="number" value="1" min="1" onkeydown="handleOutQtyKey(event)"></div>
+        <div class="col-3"><label>Seriennummer(n)</label><input id="outSerial" placeholder="optional"></div>
+      </div>
+      <button id="btnAddOutgoingPosition" class="secondary" style="margin-top:10px" onclick="addOutgoingPosition()">Position hinzufügen</button>
+      <div id="outgoingPositionsList"></div>
+      <hr>
+      <label>Grund / Info (Pflichtfeld)</label>
+      <textarea id="outReason" placeholder="z. B. 1x Switch defekt, 1x Boxapos Testgerät, 1x LAN-Kabel verbraucht ..."></textarea>
+      <button id="btnBookOutgoing" style="margin-top:10px" onclick="bookOutgoing(this)">Ausbuchen</button>
+    </div>
+  </section>
+
   <section id="issues" class="view hidden">
     <div class="grid">
       <div class="card col-5">
@@ -408,6 +432,7 @@ const SUPABASE_URL='https://tcnnuojbmglojdvybyxu.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjbm51b2pibWdsb2pkdnlieXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MTg1OTgsImV4cCI6MjA5NzA5NDU5OH0.8n7RwN5dQxxZQtf5Lgjm1bSjXrLoWvPIr3_hgBQalRs';
 let state={articles:[],issues:[],history:[]};
 let positions=[];
+let outgoingPositions=[];
 let sb=null, user=null;
 const ROLE_ADMIN='admin', ROLE_STAFF='mitarbeiter', ROLE_VIEWER='viewer';
 let userRole=ROLE_VIEWER;
@@ -452,6 +477,12 @@ function applyRoleUI(){
   if(issueScanInput)issueScanInput.disabled=!book;
   const inScanInput=document.getElementById('inScanInput');
   if(inScanInput)inScanInput.disabled=!book;
+  const outScanInput=document.getElementById('outScanInput');
+  if(outScanInput)outScanInput.disabled=!book;
+  const addOutPosBtn=document.getElementById('btnAddOutgoingPosition');
+  if(addOutPosBtn)addOutPosBtn.disabled=!book;
+  const bookOutgoingBtn=document.getElementById('btnBookOutgoing');
+  if(bookOutgoingBtn)bookOutgoingBtn.disabled=!book;
   const usersTabBtn=document.getElementById('tabBtnUsers');
   if(usersTabBtn)usersTabBtn.classList.toggle('hidden',!admin);
   const clearHistoryBtn=document.getElementById('btnClearHistory');
@@ -1734,12 +1765,117 @@ function printDeliveryNote(issueId){
   doc.save(`Lieferschein-${(i.number||issueId).replace(/[^a-zA-Z0-9-]/g,'_')}.pdf`);
 }
 
+function handleOutgoingScanKey(e){
+  if(e.key==='Enter'){e.preventDefault();processOutgoingScan()}
+}
+function processOutgoingScan(code){
+  if(denyIfNoPermission(canBook()))return;
+  const input=document.getElementById('outScanInput');
+  const raw=normalizeBarcode(code||input?.value);
+  if(!raw){toast('Kein Barcode erkannt');return}
+  if(input)input.value='';
+  const matches=findArticlesByBarcode(raw);
+  if(matches.length>1){
+    renderOutgoingScanChoices(matches,raw);
+    toast(matches.length+' Artikel zu diesem Barcode gefunden – bitte auswählen');
+    return;
+  }
+  clearOutgoingScanChoices();
+  const a=matches[0]||null;
+  if(!a){toast('Kein Artikel zu diesem Barcode gefunden');input?.focus();return}
+  selectOutgoingScanArticle(a.id);
+}
+function renderOutgoingScanChoices(matches,raw){
+  const box=document.getElementById('outScanChoice');
+  if(!box)return;
+  box.innerHTML=`
+    <div class="position-box">
+      <b>Mehrere Artikel zu diesem Barcode</b><br><small>Code: ${raw||'-'} · bitte den passenden Artikel wählen</small>
+      ${matches.map(a=>`
+        <div class="row" style="justify-content:space-between;margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+          <div><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''} · Bestand: ${a.stock||0}</small></div>
+          <button onclick="selectOutgoingScanArticle('${a.id}')">Auswählen</button>
+        </div>`).join('')}
+    </div>`;
+}
+function clearOutgoingScanChoices(){
+  const box=document.getElementById('outScanChoice');
+  if(box)box.innerHTML='';
+}
+function selectOutgoingScanArticle(articleId){
+  clearOutgoingScanChoices();
+  const a=getArticle(articleId);
+  if(!a){toast('Artikel nicht gefunden');return}
+  if((+a.stock||0)<=0){toast('Kein Bestand verfügbar für '+a.name);return}
+  outArticle.value=a.id;
+  outSerial.value=a.barcode||'';
+  toast('Artikel gewählt: '+a.name);
+  outQty.focus();
+  outQty.select();
+}
+function handleOutQtyKey(e){
+  if(e.key==='Enter'){e.preventDefault();addOutgoingPosition()}
+}
+function addOutgoingPosition(){
+  if(denyIfNoPermission(canBook()))return;
+  const a=getArticle(outArticle.value), qty=+outQty.value||0;
+  if(!a||qty<=0){toast('Position prüfen');return}
+  const alreadyQueued=outgoingPositions.filter(p=>p.article_id===a.id).reduce((s,p)=>s+p.qty,0);
+  if(qty+alreadyQueued>(+a.stock||0)){toast('Nicht genug Bestand für '+a.name);return}
+  const existing=outgoingPositions.find(p=>p.article_id===a.id);
+  if(existing)existing.qty+=qty;
+  else outgoingPositions.push({article_id:a.id,article:a.name,qty,serials:outSerial.value.trim()});
+  outQty.value=1;outSerial.value='';renderOutgoingPositions();
+  document.getElementById('outScanInput')?.focus();
+}
+function removeOutgoingPosition(i){outgoingPositions.splice(i,1);renderOutgoingPositions()}
+function renderOutgoingPositions(){
+  const box=document.getElementById('outgoingPositionsList');
+  if(!box)return;
+  box.innerHTML=outgoingPositions.map((p,i)=>`<div class="position-box"><b>${p.qty} × ${p.article}</b><br><small>Seriennummer: ${p.serials||'-'}</small><br><button class="danger" onclick="removeOutgoingPosition(${i})">Entfernen</button></div>`).join('')||'<small class="muted">Noch keine Positionen.</small>';
+}
+async function bookOutgoing(btn){
+  if(denyIfNoPermission(canBook()))return;
+  if(!outgoingPositions.length){toast('Mindestens eine Position hinzufügen');return}
+  const reason=outReason.value.trim();
+  if(!reason){toast('Grund/Info fehlt');return}
+  for(const p of outgoingPositions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
+  const batchNumber='AUSGANG-'+new Date().getFullYear()+'-'+uid().toUpperCase();
+  const userName=currentUserName();
+  setLoading(btn,true);
+  try{
+    if(sb){
+      const stockResult=await applyStockDeltasSequential(outgoingPositions.map(p=>({article_id:p.article_id,delta:-p.qty})));
+      if(stockResult.failure){
+        await rollbackStock(stockResult.originalStock,stockResult.touchedIds);
+        toast('Ausbuchen abgebrochen: '+stockResult.failure);
+        await syncDown();
+        return;
+      }
+      const histRows=outgoingPositions.map(p=>({
+        type:'Warenausgang',issue_number:batchNumber,article_id:p.article_id,article_name:p.article,
+        qty:-p.qty,user_name:userName,customer:'',project:'',tracking_code:'',serials:p.serials||'',comment:reason
+      }));
+      const {error:eHist}=await sb.from('lager_history').insert(histRows);
+      if(eHist){toast('Supabase Fehler: '+eHist.message);await syncDown();return}
+      await syncDown();
+    } else {
+      outgoingPositions.forEach(p=>{
+        const a=getArticle(p.article_id); a.stock=(+a.stock||0)-p.qty;
+        state.history.unshift({id:uid(),type:'Warenausgang',date:now(),issue_number:batchNumber,article_id:a.id,article:a.name,qty:-p.qty,user:userName,customer:'',project:'',tracking_code:'',serials:p.serials,comment:reason});
+      });
+      persist();
+    }
+    outgoingPositions=[];outReason.value='';renderOutgoingPositions();
+    toast('Warenausgang gebucht');
+  } finally { setLoading(btn,false); }
+}
 function render(){
-  applyRoleUI();renderSelects();renderDashboard();renderArticles();renderIssues();renderHistory();renderPositions()
+  applyRoleUI();renderSelects();renderDashboard();renderArticles();renderIssues();renderHistory();renderPositions();renderOutgoingPositions()
 }
 function renderSelects(){
   const opts=state.articles.map(a=>`<option value="${a.id}">${a.name} | Bestand: ${a.stock||0}</option>`).join('');
-  inArticle.innerHTML=opts;posArticle.innerHTML=opts;
+  inArticle.innerHTML=opts;posArticle.innerHTML=opts;outArticle.innerHTML=opts;
 }
 function renderDashboard(){
   kpiArticles.textContent=state.articles.length;
