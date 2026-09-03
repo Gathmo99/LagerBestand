@@ -376,8 +376,12 @@ window.addEventListener('error', function(e){
         <hr>
         <div class="grid">
           <div class="col-6"><label>Artikel</label><select id="posArticle"></select></div>
-          <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1" min="1" onkeydown="handlePosQtyKey(event)"></div>
-          <div class="col-3"><label>Seriennummer(n)</label><input id="posSerial" placeholder="optional"></div>
+          <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1" min="1" oninput="updatePosQtySerialsUI()" onkeydown="handlePosQtyKey(event)"></div>
+          <div class="col-3" id="posSerialSingleWrap"><label>Seriennummer</label><input id="posSerial" placeholder="optional"></div>
+        </div>
+        <div id="posSerialsMultiWrap" class="hidden">
+          <label>Seriennummer je Gerät (nicht der Barcode)</label>
+          <div id="posSerialsMulti" class="grid"></div>
         </div>
         <button id="btnAddPosition" class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
         <div id="positionsList"></div>
@@ -1399,22 +1403,54 @@ function selectIssueScanArticle(articleId){
 function selectScannedPositionArticle(a){
   if((+a.stock||0)<=0){toast('Kein Bestand verfügbar für '+a.name);return}
   posArticle.value=a.id;
-  posSerial.value=a.barcode||'';
+  posSerial.value='';
   toast('Artikel gewählt: '+a.name);
   posQty.focus();
   posQty.select();
+  updatePosQtySerialsUI();
 }
 function handlePosQtyKey(e){
   if(e.key==='Enter'){e.preventDefault();addPosition()}
+}
+function updatePosQtySerialsUI(){
+  const qty=+posQty.value||0;
+  const singleWrap=document.getElementById('posSerialSingleWrap');
+  const multiWrap=document.getElementById('posSerialsMultiWrap');
+  const multiBox=document.getElementById('posSerialsMulti');
+  if(qty>1){
+    const prevValues=[...multiBox.querySelectorAll('input')].map(el=>el.value);
+    singleWrap.classList.add('hidden');
+    multiWrap.classList.remove('hidden');
+    multiBox.innerHTML=Array.from({length:qty}).map((_,i)=>
+      `<div class="col-3"><input placeholder="SN Gerät ${i+1}" value="${(prevValues[i]||'').replaceAll('"','&quot;')}"></div>`
+    ).join('');
+  } else {
+    singleWrap.classList.remove('hidden');
+    multiWrap.classList.add('hidden');
+    multiBox.innerHTML='';
+  }
+}
+function collectPositionSerials(qty){
+  const multiWrap=document.getElementById('posSerialsMultiWrap');
+  if(qty>1 && !multiWrap.classList.contains('hidden')){
+    return [...document.getElementById('posSerialsMulti').querySelectorAll('input')]
+      .map(el=>el.value.trim()).filter(Boolean).join(', ');
+  }
+  return posSerial.value.trim();
 }
 function addPosition(){
   if(denyIfNoPermission(canBook()))return;
   const a=getArticle(posArticle.value), qty=+posQty.value||0; if(!a||qty<=0){toast('Position prüfen');return}
   if(qty>(+a.stock||0)){toast('Nicht genug Bestand');return}
+  const serials=collectPositionSerials(qty);
   const existing=positions.find(p=>p.article_id===a.id);
-  if(existing)existing.qty+=qty;
-  else positions.push({article_id:a.id,article:a.name,qty,serials:posSerial.value.trim()});
-  posQty.value=1;posSerial.value='';renderPositions();
+  if(existing){
+    existing.qty+=qty;
+    existing.serials=[existing.serials,serials].filter(Boolean).join(', ');
+  } else {
+    positions.push({article_id:a.id,article:a.name,qty,serials});
+  }
+  posQty.value=1;posSerial.value='';updatePosQtySerialsUI();renderPositions();
   document.getElementById('issueScanInput')?.focus();
 }
 function removePosition(i){positions.splice(i,1);renderPositions()}
