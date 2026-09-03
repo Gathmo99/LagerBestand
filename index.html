@@ -377,7 +377,7 @@ window.addEventListener('error', function(e){
         <div class="grid">
           <div class="col-6"><label>Artikel</label><select id="posArticle"></select></div>
           <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1" min="1" oninput="updatePosQtySerialsUI()" onkeydown="handlePosQtyKey(event)"></div>
-          <div class="col-3" id="posSerialSingleWrap"><label>Seriennummer</label><input id="posSerial" placeholder="optional"></div>
+          <div class="col-3" id="posSerialSingleWrap"><label>Seriennummer(n)</label><input id="posSerial" placeholder="optional"></div>
         </div>
         <div id="posSerialsMultiWrap" class="hidden">
           <label>Seriennummer je Gerät (nicht der Barcode)</label>
@@ -1776,7 +1776,7 @@ function printDeliveryNote(issueId){
   doc.rect(marginX,y,pageWidth-marginX*2,7,'F');
   doc.text('Menge',marginX+2,y+5);
   doc.text('Artikel',marginX+22,y+5);
-  doc.text('Seriennummer',pageWidth-marginX-45,y+5);
+  doc.text('Seriennummer(n)',pageWidth-marginX-45,y+5);
   y+=7;
   doc.setFont(undefined,'normal');
   (i.positions||[]).forEach(p=>{
@@ -2054,7 +2054,7 @@ function exportExcel(){
     buildIssuesRows(),[16,18,14,20,16,20,26,16,40,16,26,30,16]
   ),'Versand');
   XLSX.utils.book_append_sheet(wb,sheetFromRows(
-    ['Versand-Nr.','Datum','Kunde','Artikel','Menge','Seriennummer'],
+    ['Versand-Nr.','Datum','Kunde','Artikel','Menge','Seriennummer(n)'],
     buildIssuePositionsRows(),[16,18,20,26,8,20]
   ),'Versand-Positionen');
   XLSX.utils.book_append_sheet(wb,sheetFromRows(
