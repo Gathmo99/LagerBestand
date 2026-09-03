@@ -317,9 +317,13 @@ window.addEventListener('error', function(e){
   <section id="incoming" class="view hidden">
     <div class="card">
       <h2>📥 Wareneingang buchen</h2>
+      <label>Barcode scannen (füllt Artikel automatisch aus)</label>
+      <input id="inScanInput" autocomplete="off" inputmode="none" placeholder="Barcode scannen ..." onkeydown="handleIncomingScanKey(event)">
+      <div id="inScanChoice"></div>
+      <hr>
       <div class="grid">
         <div class="col-6"><label>Artikel</label><select id="inArticle"></select></div>
-        <div class="col-2"><label>Menge</label><input id="inQty" type="number" value="1"></div>
+        <div class="col-2"><label>Menge</label><input id="inQty" type="number" value="1" min="1"></div>
         <div class="col-4"><label>Kommentar</label><input id="inComment" placeholder="Wareneingang, Rückläufer ..."></div>
       </div>
       <button id="btnBookIncoming" style="margin-top:10px" onclick="bookIncoming(this)">Einlagern</button>
@@ -443,6 +447,8 @@ function applyRoleUI(){
   if(saveIssueBtn)saveIssueBtn.disabled=!book;
   const issueScanInput=document.getElementById('issueScanInput');
   if(issueScanInput)issueScanInput.disabled=!book;
+  const inScanInput=document.getElementById('inScanInput');
+  if(inScanInput)inScanInput.disabled=!book;
   const usersTabBtn=document.getElementById('tabBtnUsers');
   if(usersTabBtn)usersTabBtn.classList.toggle('hidden',!admin);
   const clearHistoryBtn=document.getElementById('btnClearHistory');
@@ -1163,6 +1169,52 @@ async function deleteArticle(id,btn){
 }
 function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment','aImageUrl'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;pendingArticleImageFile=null;pendingImageRemoval=false;aImageFile.value='';showArticleImagePreview('');articleFormTitle.textContent='Artikel anlegen'}
 
+function handleIncomingScanKey(e){
+  if(e.key==='Enter'){e.preventDefault();processIncomingScan()}
+}
+function processIncomingScan(code){
+  if(denyIfNoPermission(canBook()))return;
+  const input=document.getElementById('inScanInput');
+  const raw=normalizeBarcode(code||input?.value);
+  if(!raw){toast('Kein Barcode erkannt');return}
+  if(input)input.value='';
+  const matches=findArticlesByBarcode(raw);
+  if(matches.length>1){
+    renderIncomingScanChoices(matches,raw);
+    toast(matches.length+' Artikel zu diesem Barcode gefunden – bitte auswählen');
+    return;
+  }
+  clearIncomingScanChoices();
+  const a=matches[0]||null;
+  if(!a){toast('Kein Artikel zu diesem Barcode gefunden');input?.focus();return}
+  selectIncomingScanArticle(a.id);
+}
+function renderIncomingScanChoices(matches,raw){
+  const box=document.getElementById('inScanChoice');
+  if(!box)return;
+  box.innerHTML=`
+    <div class="position-box">
+      <b>Mehrere Artikel zu diesem Barcode</b><br><small>Code: ${raw||'-'} · bitte den passenden Artikel wählen</small>
+      ${matches.map(a=>`
+        <div class="row" style="justify-content:space-between;margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+          <div><b>${a.name}</b><br><small>${a.brand||''} ${a.model||''} · Bestand: ${a.stock||0}</small></div>
+          <button onclick="selectIncomingScanArticle('${a.id}')">Auswählen</button>
+        </div>`).join('')}
+    </div>`;
+}
+function clearIncomingScanChoices(){
+  const box=document.getElementById('inScanChoice');
+  if(box)box.innerHTML='';
+}
+function selectIncomingScanArticle(articleId){
+  clearIncomingScanChoices();
+  const a=getArticle(articleId);
+  if(!a){toast('Artikel nicht gefunden');return}
+  inArticle.value=a.id;
+  toast('Artikel gewählt: '+a.name);
+  inQty.focus();
+  inQty.select();
+}
 async function bookIncoming(btn){
   if(denyIfNoPermission(canBook()))return;
   const a=getArticle(inArticle.value), qty=+inQty.value||0; if(!a||qty<=0){toast('Artikel/Menge prüfen');return}
