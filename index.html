@@ -352,7 +352,7 @@ window.addEventListener('error', function(e){
         <hr>
         <div class="grid">
           <div class="col-6"><label>Artikel</label><select id="posArticle"></select></div>
-          <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1"></div>
+          <div class="col-3"><label>Menge</label><input id="posQty" type="number" value="1" min="1" onkeydown="handlePosQtyKey(event)"></div>
           <div class="col-3"><label>Seriennummer(n)</label><input id="posSerial" placeholder="optional"></div>
         </div>
         <button id="btnAddPosition" class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
@@ -1323,8 +1323,7 @@ function processIssueScan(code){
   clearIssueScanChoices();
   const a=matches[0]||null;
   if(!a){toast('Kein Artikel zu diesem Barcode gefunden');input?.focus();return}
-  addIssueScanPosition(a);
-  input?.focus();
+  selectScannedPositionArticle(a);
 }
 function renderIssueScanChoices(matches,raw){
   const box=document.getElementById('issueScanChoice');
@@ -1347,23 +1346,28 @@ function selectIssueScanArticle(articleId){
   const a=getArticle(articleId);
   clearIssueScanChoices();
   if(!a){toast('Artikel nicht gefunden');return}
-  addIssueScanPosition(a);
-  document.getElementById('issueScanInput')?.focus();
+  selectScannedPositionArticle(a);
 }
-function addIssueScanPosition(a){
+function selectScannedPositionArticle(a){
   if((+a.stock||0)<=0){toast('Kein Bestand verfügbar für '+a.name);return}
-  const existing=positions.find(p=>p.article_id===a.id);
-  if(existing)existing.qty+=1;
-  else positions.push({article_id:a.id,article:a.name,qty:1,serials:a.barcode||''});
-  renderPositions();
-  toast('Hinzugefügt: '+a.name);
+  posArticle.value=a.id;
+  posSerial.value=a.barcode||'';
+  toast('Artikel gewählt: '+a.name);
+  posQty.focus();
+  posQty.select();
+}
+function handlePosQtyKey(e){
+  if(e.key==='Enter'){e.preventDefault();addPosition()}
 }
 function addPosition(){
   if(denyIfNoPermission(canBook()))return;
   const a=getArticle(posArticle.value), qty=+posQty.value||0; if(!a||qty<=0){toast('Position prüfen');return}
   if(qty>(+a.stock||0)){toast('Nicht genug Bestand');return}
-  positions.push({article_id:a.id,article:a.name,qty,serials:posSerial.value.trim()});
-  posQty.value=1;posSerial.value='';renderPositions()
+  const existing=positions.find(p=>p.article_id===a.id);
+  if(existing)existing.qty+=qty;
+  else positions.push({article_id:a.id,article:a.name,qty,serials:posSerial.value.trim()});
+  posQty.value=1;posSerial.value='';renderPositions();
+  document.getElementById('issueScanInput')?.focus();
 }
 function removePosition(i){positions.splice(i,1);renderPositions()}
 function renderPositions(){
