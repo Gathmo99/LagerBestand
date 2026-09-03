@@ -362,7 +362,10 @@ window.addEventListener('error', function(e){
       </div>
 
       <div class="card col-7">
-        <h2>Versand</h2>
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">Versand</h2>
+          <button id="btnToggleArchived" class="secondary" onclick="toggleArchivedIssues()">Archivierte anzeigen</button>
+        </div>
         <input class="search" id="issueSearch" oninput="render()" placeholder="Suche Kunde, Projekt, Tracking, Seriennummer ...">
         <div id="issueList"></div>
       </div>
@@ -1773,9 +1776,19 @@ function renderArticles(){
   </tr>`).join('');
   articleTable.innerHTML=`<tr><th>Bild</th><th>Artikel</th><th>Kategorie</th><th>Barcode</th><th>Lagerort</th><th>EK</th><th>VK</th><th>Bestand</th><th>Maße</th><th>Gewicht</th><th>Notiz</th><th></th></tr>${rows}`;
 }
+let showArchivedIssues=false;
+function toggleArchivedIssues(){
+  showArchivedIssues=!showArchivedIssues;
+  render();
+}
 function renderIssues(){
   const q=(issueSearch?.value||'').toLowerCase();
-  const items=state.issues.filter(i=>JSON.stringify(i).toLowerCase().includes(q)).map(i=>`
+  const archivedCount=state.issues.filter(i=>i.status==='Storniert').length;
+  const toggleBtn=document.getElementById('btnToggleArchived');
+  if(toggleBtn){
+    toggleBtn.textContent=(showArchivedIssues?'Archivierte ausblenden':'Archivierte anzeigen')+(archivedCount?` (${archivedCount})`:'');
+  }
+  const items=state.issues.filter(i=>(showArchivedIssues||i.status!=='Storniert')&&JSON.stringify(i).toLowerCase().includes(q)).map(i=>`
     <div class="card" style="margin-bottom:10px;background:#131824">
       <div class="row" style="justify-content:space-between">
         <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${safeExternalUrl(i.tracking_link)?`<a href="${safeExternalUrl(i.tracking_link)}" target="_blank" rel="noopener">${i.tracking_label||i.tracking_code||'Tracking öffnen'}</a>`:(i.tracking_label||i.tracking_code||'-')}</small></div>
