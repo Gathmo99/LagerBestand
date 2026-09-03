@@ -1242,8 +1242,9 @@ async function bookIncoming(btn){
 function getTrackingInfo(url){
   const raw=(url||'').trim();
   if(!raw)return {carrier:'',code:'',label:'-'};
+  const normalized=/^https?:\/\//i.test(raw)?raw:(/^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(raw)?'https://'+raw:raw);
   try{
-    const u=new URL(raw);
+    const u=new URL(normalized);
     const host=u.hostname.toLowerCase();
 
     const carrier =
@@ -1299,6 +1300,19 @@ function getTrackingInfo(url){
 
 function extractTrackingCode(url){
   return getTrackingInfo(url).code;
+}
+function safeExternalUrl(raw){
+  const s=(raw||'').trim();
+  if(!s)return '';
+  try{
+    const u=new URL(s);
+    if(u.protocol==='http:'||u.protocol==='https:')return u.href;
+    return '';
+  }catch(e){}
+  if(/^[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i.test(s)){
+    try{return new URL('https://'+s).href}catch(e){}
+  }
+  return '';
 }
 
 function showTrackingPreview(){
@@ -1764,7 +1778,7 @@ function renderIssues(){
   const items=state.issues.filter(i=>JSON.stringify(i).toLowerCase().includes(q)).map(i=>`
     <div class="card" style="margin-bottom:10px;background:#131824">
       <div class="row" style="justify-content:space-between">
-        <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${i.tracking_link?`<a href="${i.tracking_link}" target="_blank">${i.tracking_label||i.tracking_code||'Tracking öffnen'}</a>`:(i.tracking_label||i.tracking_code||'-')}</small></div>
+        <div><b>${i.number}</b> · ${i.customer}<br><small>${todayText(i.date)} · ${i.project||'-'} · Tracking: ${safeExternalUrl(i.tracking_link)?`<a href="${safeExternalUrl(i.tracking_link)}" target="_blank" rel="noopener">${i.tracking_label||i.tracking_code||'Tracking öffnen'}</a>`:(i.tracking_label||i.tracking_code||'-')}</small></div>
         <select style="width:auto" ${(i.status==='Storniert'||!canBook())?'disabled':''} onchange="updateIssueStatus('${i.id}',this.value,this)">
           ${['Vorbereitung','Verpackt','Versendet','Zugestellt'].map(s=>`<option ${i.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
