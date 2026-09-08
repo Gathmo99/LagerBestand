@@ -809,7 +809,7 @@ async function register(btn){
     const {data,error}=await sb.auth.signUp({email,password,options:{data:{name}}});
     if(error){toast(error.message);return;}
     if(data?.user){
-      await sb.from('lager_profiles').upsert({id:data.user.id,email,name,role:ROLE_STAFF});
+      await sb.from('lager_profiles').upsert({id:data.user.id,email,name,role:ROLE_VIEWER});
     }
     toast('Registriert. Falls E-Mail-Bestätigung aktiv ist, bitte bestätigen und danach einloggen.');
     authEmail.value=email;
