@@ -210,7 +210,11 @@ window.addEventListener('error', function(e){
           <option>Fach D</option>
         </select></div>
         <div class="col-4"><label>EK (€)</label><input id="aEK" type="number" step="0.01" oninput="calcVK()"></div>
-        <div class="col-4"><label>VK (€) automatisch +40%</label><input id="aVK" type="number" step="0.01" readonly></div>
+        <div class="col-4"><label>VK-Berechnung</label><select id="aVkMode" onchange="toggleVkMode()">
+          <option value="auto">Automatisch (+40%)</option>
+          <option value="manual">Manuell</option>
+        </select></div>
+        <div class="col-4"><label>VK (€)</label><input id="aVK" type="number" step="0.01" readonly></div>
         <div class="col-4"><label>Bestand</label><input id="aStock" type="number" step="1" value="0"></div>
         <div class="col-6"><label>Mindestbestand</label><input id="aMin" type="number" step="1" value="0"></div>
         <div class="col-6"><label>Maße</label><input id="aDimensions" placeholder="L x B x H"></div>
@@ -1129,8 +1133,18 @@ function closeImageLightbox(){
 }
 function openArticleModal(){resetArticleForm();articleModal.classList.remove('hidden')}
 function calcVK(){
+  if(aVkMode.value!=='auto')return;
   const ek=Number(aEK.value)||0;
   aVK.value=ek ? (ek*1.4).toFixed(2) : '';
+}
+function toggleVkMode(){
+  if(aVkMode.value==='manual'){
+    aVK.readOnly=false;
+    aVK.focus();
+  } else {
+    aVK.readOnly=true;
+    calcVK();
+  }
 }
 
 function toggleShelfFields(){
@@ -1154,7 +1168,9 @@ function storageLabel(a){
 function closeArticleModal(){articleModal.classList.add('hidden')}
 async function saveArticle(btn){
   if(denyIfNoPermission(canBook()))return;
-  const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal'; const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:+(ekValue*1.4).toFixed(2),stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),image_url:aImageUrl.value||'',updated_at:now()};
+  const ekValue=+aEK.value||0; const loc=aStorageLocation.value||'Regal';
+  const vkValue=aVkMode.value==='manual'?(+aVK.value||0):+(ekValue*1.4).toFixed(2);
+  const obj={id:articleId.value||uid(),name:aName.value.trim(),brand:aBrand.value.trim(),model:aModel.value.trim(),barcode:normalizeBarcode(aBarcode.value),category:aCategory.value.trim(),storage_location:loc,shelf:loc==='Regal'?aShelf.value.trim():'',shelf_compartment:loc==='Regal'?aShelfCompartment.value.trim():'',ek:ekValue,vk:vkValue,stock:+aStock.value||0,min:+aMin.value||0,dimensions:aDimensions.value.trim(),weight:+aWeight.value||0,note:aNote.value.trim(),image_url:aImageUrl.value||'',updated_at:now()};
   if(!obj.name){toast('Name fehlt');return}
   setLoading(btn,true);
   try{
@@ -1190,7 +1206,17 @@ async function saveArticle(btn){
     resetArticleForm();closeArticleModal();toast('Artikel gespeichert')
   } finally { setLoading(btn,false); }
 }
-function editArticle(id){const a=getArticle(id); if(!a)return; articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();aEK.value=a.ek||0;calcVK();aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';pendingArticleImageFile=null;pendingImageRemoval=false;aImageFile.value='';aImageUrl.value=a.image_url||'';showArticleImagePreview(a.image_url||'');articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden')}
+function editArticle(id){
+  const a=getArticle(id); if(!a)return;
+  articleId.value=a.id;aName.value=a.name;aBrand.value=a.brand||'';aModel.value=a.model||'';aBarcode.value=a.barcode||'';aCategory.value=a.category||'';aStorageLocation.value=a.storage_location||'Regal';aShelf.value=a.shelf||'';aShelfCompartment.value=a.shelf_compartment||'';toggleShelfFields();
+  aEK.value=a.ek||0;
+  const autoVk=+((+a.ek||0)*1.4).toFixed(2);
+  const isAuto=Math.abs((+a.vk||0)-autoVk)<0.01;
+  aVkMode.value=isAuto?'auto':'manual';
+  aVK.value=a.vk||0;
+  aVK.readOnly=isAuto;
+  aStock.value=a.stock||0;aMin.value=a.min||0;aDimensions.value=a.dimensions||'';aWeight.value=a.weight||0;aNote.value=a.note||'';pendingArticleImageFile=null;pendingImageRemoval=false;aImageFile.value='';aImageUrl.value=a.image_url||'';showArticleImagePreview(a.image_url||'');articleFormTitle.textContent='Artikel bearbeiten';articleModal.classList.remove('hidden');
+}
 async function deleteArticle(id,btn){
   if(denyIfNoPermission(isAdmin()))return;
   if(!confirm('Artikel wirklich löschen?'))return;
@@ -1205,7 +1231,7 @@ async function deleteArticle(id,btn){
     }
   } finally { setLoading(btn,false); }
 }
-function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment','aImageUrl'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;pendingArticleImageFile=null;pendingImageRemoval=false;aImageFile.value='';showArticleImagePreview('');articleFormTitle.textContent='Artikel anlegen'}
+function resetArticleForm(){['articleId','aName','aBrand','aModel','aBarcode','aCategory','aEK','aVK','aStock','aMin','aDimensions','aWeight','aNote','aShelf','aShelfCompartment','aImageUrl'].forEach(id=>document.getElementById(id).value='');aStorageLocation.value='Regal';toggleShelfFields();aStock.value=0;aMin.value=0;aVkMode.value='auto';aVK.readOnly=true;pendingArticleImageFile=null;pendingImageRemoval=false;aImageFile.value='';showArticleImagePreview('');articleFormTitle.textContent='Artikel anlegen'}
 
 function handleIncomingScanKey(e){
   if(e.key==='Enter'){e.preventDefault();processIncomingScan()}
