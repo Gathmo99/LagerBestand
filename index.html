@@ -1807,10 +1807,13 @@ function printDeliveryNote(issueId){
   doc.setFont(undefined,'normal');
   (i.positions||[]).forEach(p=>{
     if(y>270){doc.addPage();y=20;}
+    const articleLines=doc.splitTextToSize(String(p.article||'-'),pageWidth-marginX*2-70);
+    const serialLines=doc.splitTextToSize(String(p.serials||'-'),43);
+    const rowLines=Math.max(1,articleLines.length,serialLines.length);
     doc.text(String(p.qty||0),marginX+2,y+5);
-    doc.text(String(p.article||'-'),marginX+22,y+5,{maxWidth:pageWidth-marginX*2-70});
-    doc.text(String(p.serials||'-'),pageWidth-marginX-45,y+5,{maxWidth:43});
-    y+=7;
+    doc.text(articleLines,marginX+22,y+5);
+    doc.text(serialLines,pageWidth-marginX-45,y+5);
+    y+=rowLines*5+2;
     doc.setDrawColor(225);
     doc.line(marginX,y,pageWidth-marginX,y);
   });
