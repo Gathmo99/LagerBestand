@@ -1787,7 +1787,7 @@ async function loadUsers(){
   table.innerHTML=`<tr><th>Name</th><th>E-Mail</th><th>Rolle</th><th></th></tr>${rows||'<tr><td colspan="4">Keine Nutzer gefunden.</td></tr>'}`;
   window.userRows=data||[];
 }
-// Setzt das Passwort eines Nutzers direkt. Läuft über die Edge Function "admin-set-password",
+// Setzt das Passwort eines Nutzers direkt. Läuft über die Edge Function "admin-set-password" (im Dashboard unter dem Slug "hyper-handler" deployt),
 // weil dafür der Service-Role-Key nötig ist, der nie im Browser liegen darf.
 async function adminSetPassword(id,btn){
   if(denyIfNoPermission(isAdmin()))return;
@@ -1798,7 +1798,7 @@ async function adminSetPassword(id,btn){
   if(pw.length<6){toast('Mindestens 6 Zeichen.');return}
   setLoading(btn,true);
   try{
-    const {data,error}=await sb.functions.invoke('admin-set-password',{body:{userId:id,password:pw}});
+    const {data,error}=await sb.functions.invoke('hyper-handler',{body:{userId:id,password:pw}});
     if(error||data?.error){toast('Fehler: '+(data?.error||error.message));return}
     toast('Passwort für '+(p.email||p.name)+' geändert');
   } finally { setLoading(btn,false); }
