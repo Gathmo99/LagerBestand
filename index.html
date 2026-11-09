@@ -87,6 +87,16 @@ window.addEventListener('error', function(e){
       <button class="secondary" style="margin-top:10px;width:100%" onclick="resetPassword(this)">Passwort vergessen</button>
     </div>
 
+    <div id="recoveryMode" class="hidden">
+      <label>Neues Passwort</label>
+      <input id="newPassword" type="password" autocomplete="new-password" placeholder="Mindestens 6 Zeichen">
+      <label>Neues Passwort wiederholen</label>
+      <input id="newPassword2" type="password" autocomplete="new-password" placeholder="Wiederholen">
+      <div class="row" style="margin-top:12px">
+        <button onclick="saveNewPassword(this)">Passwort speichern</button>
+      </div>
+    </div>
+
     <div id="registerMode" class="hidden">
       <label>Name</label>
       <input id="authName" autocomplete="name" placeholder="Jan">
@@ -751,12 +761,49 @@ function enterLocalMode(){
   toast('Lokalmodus aktiv – keine Cloud-Verbindung');
 }
 
+// Link aus der "Passwort vergessen"-Mail: Nutzer muss ein neues Passwort setzen, statt direkt in die App zu rutschen.
+let recoveryMode=false;
+
+function showRecovery(){
+  recoveryMode=true;
+  showLoginScreen();
+  loginMode.classList.add('hidden');
+  registerMode.classList.add('hidden');
+  recoveryMode_el().classList.remove('hidden');
+}
+function recoveryMode_el(){return document.getElementById('recoveryMode')}
+
+async function saveNewPassword(btn){
+  if(!sb){toast('Cloud-Verbindung ist nicht bereit.');return;}
+  const p1=newPassword.value, p2=newPassword2.value;
+  if(p1.length<6){toast('Mindestens 6 Zeichen.');return;}
+  if(p1!==p2){toast('Passwörter stimmen nicht überein.');return;}
+  setLoading(btn,true);
+  try{
+    const {data,error}=await sb.auth.updateUser({password:p1});
+    if(error){toast(error.message);return;}
+    recoveryMode=false;
+    history.replaceState(null,'',location.pathname+location.search);
+    recoveryMode_el().classList.add('hidden');
+    user=data.user;
+    showApp();
+    toast('Passwort geändert');
+    await syncDown();
+    await fetchUserRole();
+    subscribeRealtime();
+  } finally { setLoading(btn,false); }
+}
+
 function initSupabase(){
   try{
     if(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase){
+      const isRecoveryLink=/type=recovery/.test(location.hash+location.search);
       sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+      sb.auth.onAuthStateChange((event)=>{ if(event==='PASSWORD_RECOVERY') showRecovery(); });
       syncState.textContent='Cloud verbunden';
+      if(isRecoveryLink) showRecovery();
       sb.auth.getUser().then(({data})=>{
+        if(recoveryMode) return;
         if(data && data.user){
           user=data.user;
           showApp();
@@ -1731,9 +1778,41 @@ async function loadUsers(){
         <option value="viewer" ${p.role==='viewer'?'selected':''}>Nur Ansicht</option>
       </select>
     </td>
-    <td>${p.id===user?.id?'<span class="badge">Du</span>':''}</td>
+    <td>
+      ${p.id===user?.id?'<span class="badge">Du</span> ':''}
+      <button class="secondary" onclick="adminSetPassword('${p.id}',this)">Passwort setzen</button>
+      <button class="secondary" onclick="adminSendReset('${p.id}',this)">Reset-Mail</button>
+    </td>
   </tr>`).join('');
   table.innerHTML=`<tr><th>Name</th><th>E-Mail</th><th>Rolle</th><th></th></tr>${rows||'<tr><td colspan="4">Keine Nutzer gefunden.</td></tr>'}`;
+  window.userRows=data||[];
+}
+// Setzt das Passwort eines Nutzers direkt. Läuft über die Edge Function "admin-set-password",
+// weil dafür der Service-Role-Key nötig ist, der nie im Browser liegen darf.
+async function adminSetPassword(id,btn){
+  if(denyIfNoPermission(isAdmin()))return;
+  const p=(window.userRows||[]).find(x=>x.id===id);
+  if(!p)return;
+  const pw=prompt('Neues Passwort für '+(p.email||p.name)+' (mind. 6 Zeichen):');
+  if(pw===null)return;
+  if(pw.length<6){toast('Mindestens 6 Zeichen.');return}
+  setLoading(btn,true);
+  try{
+    const {data,error}=await sb.functions.invoke('admin-set-password',{body:{userId:id,password:pw}});
+    if(error||data?.error){toast('Fehler: '+(data?.error||error.message));return}
+    toast('Passwort für '+(p.email||p.name)+' geändert');
+  } finally { setLoading(btn,false); }
+}
+async function adminSendReset(id,btn){
+  if(denyIfNoPermission(isAdmin()))return;
+  const p=(window.userRows||[]).find(x=>x.id===id);
+  if(!p||!p.email)return;
+  if(!confirm('Reset-Mail an '+p.email+' schicken?'))return;
+  setLoading(btn,true);
+  try{
+    const {error}=await sb.auth.resetPasswordForEmail(p.email,{redirectTo:location.origin+location.pathname});
+    toast(error?error.message:'Reset-Link an '+p.email+' verschickt');
+  } finally { setLoading(btn,false); }
 }
 async function updateUserRole(id,role,sel){
   if(denyIfNoPermission(isAdmin()))return;
