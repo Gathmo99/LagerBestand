@@ -23,8 +23,8 @@ small,.muted{color:var(--muted)}
 main{padding:18px;max-width:1500px;margin:0 auto}
 .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
 .card{background:linear-gradient(180deg,var(--panel),#141720);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.22)}
-.col-3{grid-column:span 3}.col-4{grid-column:span 4}.col-5{grid-column:span 5}.col-6{grid-column:span 6}.col-7{grid-column:span 7}.col-8{grid-column:span 8}.col-12{grid-column:span 12}
-@media(max-width:950px){.col-3,.col-4,.col-5,.col-6,.col-7,.col-8{grid-column:span 12}header{display:block}}
+.col-2{grid-column:span 2}.col-3{grid-column:span 3}.col-4{grid-column:span 4}.col-5{grid-column:span 5}.col-6{grid-column:span 6}.col-7{grid-column:span 7}.col-8{grid-column:span 8}.col-12{grid-column:span 12}
+@media(max-width:950px){.col-2,.col-3,.col-4,.col-5,.col-6,.col-7,.col-8{grid-column:span 12}header{display:block}}
 input,select,textarea{width:100%;padding:10px 11px;border-radius:10px;border:1px solid var(--line);background:#0f1320;color:var(--text);outline:none}
 textarea{min-height:76px;resize:vertical}
 label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
@@ -398,6 +398,16 @@ window.addEventListener('error', function(e){
           <div id="posSerialsMulti" class="grid"></div>
         </div>
         <button id="btnAddPosition" class="secondary" style="margin-top:10px" onclick="addPosition()">Position hinzufügen</button>
+        <hr>
+        <h4>Freie Position (nicht im Lagerbestand)</h4>
+        <small class="muted">Wird mitgeschickt und auf dem Lieferschein aufgeführt, aber nicht vom Bestand abgebucht.</small>
+        <div class="grid">
+          <div class="col-6"><label>Bezeichnung</label><input id="freeName" placeholder="z. B. Netzkabel 2 m" onkeydown="if(event.key==='Enter'){event.preventDefault();addFreePosition()}"></div>
+          <div class="col-2"><label>Menge</label><input id="freeQty" type="number" value="1" min="1"></div>
+          <div class="col-2"><label>kg / Stück</label><input id="freeWeight" type="number" min="0" step="0.001" placeholder="optional"></div>
+          <div class="col-2"><label>Seriennr.</label><input id="freeSerial" placeholder="optional"></div>
+        </div>
+        <button class="secondary" style="margin-top:10px" onclick="addFreePosition()">Freie Position hinzufügen</button>
         <div id="positionsList"></div>
         <div class="position-box" style="margin-top:12px"><b>Gesamtgewicht des Versands:</b> <span id="issueTotalWeight">0 kg</span></div>
         <button id="btnSaveIssue" style="margin-top:12px" onclick="saveIssue(this)">Versand speichern</button>
@@ -909,7 +919,7 @@ function issueFromDb(i, positions){
     destination:i.destination||'',address:i.address||'',offer:i.offer||'',purpose:i.purpose||'',tracking_link:i.tracking_link||'',
     tracking_code:i.tracking_code||'',tracking_label:getTrackingInfo(i.tracking_link||i.tracking_code||'').label,status:i.status||'Vorbereitung',user:i.created_by_name||'Unbekannt',total_weight:+i.total_weight||0,
     positions:(positions||[]).filter(p=>p.issue_id===i.id).map(p=>({
-      article_id:p.article_id,article:p.article_name||articleName(p.article_id),qty:+p.qty||0,serials:p.serials||''
+      article_id:p.article_id,article:p.article_name||articleName(p.article_id),qty:+p.qty||0,serials:p.serials||'',free:!p.article_id
     }))
   };
 }
@@ -976,6 +986,15 @@ async function callCreateIssueRpc(issue){
     },
     p_positions:issue.positions.map(p=>({article_id:p.article_id,article_name:p.article,qty:p.qty,serials:p.serials||''}))
   });
+}
+async function insertFreePositions(issue,free){
+  const {error}=await sb.from('lager_issue_positions').insert(free.map(p=>({issue_id:issue.id,article_id:null,article_name:p.article,qty:p.qty,serials:p.serials||''})));
+  if(error)return {error};
+  return await sb.from('lager_history').insert(free.map(p=>({
+    type:'Versand',issue_id:issue.id,issue_number:issue.number,article_id:null,article_name:p.article,
+    qty:-p.qty,user_name:issue.user,customer:issue.customer,project:issue.project,
+    tracking_code:issue.tracking_code,serials:p.serials||'',comment:(issue.purpose?issue.purpose+' · ':'')+'freie Position (nicht im Lagerbestand)'
+  })));
 }
 async function callCancelIssueRpc(issueId,userName){
   return await sb.rpc('lager_cancel_issue',{p_issue_id:issueId,p_user_name:userName});
@@ -1102,8 +1121,8 @@ function formatWeight(n){
 }
 function calculatePositionsWeight(posList){
   return (posList||[]).reduce((sum,p)=>{
-    const a=getArticle(p.article_id);
-    return sum + ((+a?.weight||0) * (+p.qty||0));
+    const unit=p.article_id?(+getArticle(p.article_id)?.weight||0):(+p.weight||0);
+    return sum + (unit * (+p.qty||0));
   },0);
 }
 
@@ -1526,12 +1545,23 @@ function addPosition(){
   posQty.value=1;posSerial.value='';updatePosQtySerialsUI();renderPositions();
   document.getElementById('issueScanInput')?.focus();
 }
+// Freie Positionen haben keine article_id: kein Bestand, keine Abbuchung.
+function addFreePosition(){
+  if(denyIfNoPermission(canBook()))return;
+  const name=freeName.value.trim(), qty=+freeQty.value||0;
+  if(!name||qty<=0){toast('Bezeichnung und Menge prüfen');return}
+  const weight=Math.max(0,+String(freeWeight.value).replace(',','.')||0);
+  positions.push({article_id:null,article:name,qty,serials:freeSerial.value.trim(),free:true,weight});
+  freeName.value='';freeQty.value=1;freeWeight.value='';freeSerial.value='';renderPositions();
+  freeName.focus();
+}
 function removePosition(i){positions.splice(i,1);renderPositions()}
 function renderPositions(){
   positionsList.innerHTML=positions.map((p,i)=>{
     const a=getArticle(p.article_id);
     const unitWeight=+a?.weight||0;
     const totalWeight=unitWeight*(+p.qty||0);
+    if(!p.article_id)return `<div class="position-box"><b>${p.qty} × ${p.article}</b> <span class="badge">frei</span><br><small>Seriennummer: ${p.serials||'-'} · Gewicht: ${formatWeight(p.weight)} pro Stück · Position: ${formatWeight((+p.weight||0)*(+p.qty||0))} · nicht im Lagerbestand</small><br><button class="danger" onclick="removePosition(${i})">Entfernen</button></div>`;
     return `<div class="position-box"><b>${p.qty} × ${p.article}</b><br><small>Seriennummer: ${p.serials||'-'} · Gewicht: ${formatWeight(unitWeight)} pro Stück · Position: ${formatWeight(totalWeight)}</small><br><button class="danger" onclick="removePosition(${i})">Entfernen</button></div>`;
   }).join('')||'<small class="muted">Noch keine Positionen.</small>';
   const total=document.getElementById('issueTotalWeight');
@@ -1541,15 +1571,22 @@ async function saveIssue(btn){
   if(denyIfNoPermission(canBook()))return;
   if(!iCustomer.value.trim()){toast('Kunde fehlt');return}
   if(!positions.length){toast('Mindestens eine Position hinzufügen');return}
-  for(const p of positions){const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
+  for(const p of positions){if(!p.article_id)continue; const a=getArticle(p.article_id); if(!a||p.qty>(+a.stock||0)){toast('Bestand reicht nicht für '+p.article);return}}
   const issue={id:uid(),number:'VERSAND-'+new Date().getFullYear()+'-'+String(state.issues.length+1).padStart(4,'0'),date:now(),customer:iCustomer.value.trim(),project:iProject.value.trim(),destination:iDestination.value.trim(),address:(document.getElementById('iAddress')?.value||'').trim(),offer:(document.getElementById('iOffer')?.value||'').trim(),purpose:iPurpose.value.trim(),tracking_link:iTracking.value.trim(),tracking_code:extractTrackingCode(iTracking.value),tracking_label:getTrackingInfo(iTracking.value).label,status:iStatus.value,user:currentUserName(),positions:[...positions],total_weight:calculatePositionsWeight(positions)};
   setLoading(btn,true);
   try{
   if(sb){
-    const rpcRes=await callCreateIssueRpc(issue);
-    if(!rpcRes.error){
+    // Freie Positionen laufen nicht durch die Bestands-Funktion, sondern werden danach separat eingetragen.
+    // Besteht der Versand nur aus freien Positionen, wird der Weg ohne DB-Funktion genutzt (keine Bestandsänderung nötig).
+    const stocked=issue.positions.filter(p=>p.article_id), free=issue.positions.filter(p=>!p.article_id);
+    const rpcRes=stocked.length?await callCreateIssueRpc({...issue,positions:stocked}):null;
+    if(rpcRes && !rpcRes.error){
+      if(free.length){
+        const {error:eFree}=await insertFreePositions(issue,free);
+        if(eFree){toast('Versand gespeichert, aber freie Positionen nicht: '+eFree.message);await syncDown();return}
+      }
       await syncDown();
-    } else if(isMissingFunctionError(rpcRes.error)){
+    } else if(!rpcRes || isMissingFunctionError(rpcRes.error)){
       // Migration (supabase-migration-atomic-issues.sql) noch nicht ausgeführt: alter Weg als Fallback.
       const {error:eIssue,missingCols}=await insertIssueRow(issue);
       if(eIssue){toast('Supabase Fehler: '+eIssue.message);return}
@@ -1581,8 +1618,8 @@ async function saveIssue(btn){
     }
   } else {
     issue.positions.forEach(p=>{
-      const a=getArticle(p.article_id); a.stock=(+a.stock||0)-p.qty;
-      state.history.unshift({id:uid(),type:'Versand',date:issue.date,issue_id:issue.id,issue_number:issue.number,article_id:a.id,article:a.name,qty:-p.qty,user:issue.user,customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,serials:p.serials,comment:issue.purpose});
+      const a=p.article_id?getArticle(p.article_id):null; if(a)a.stock=(+a.stock||0)-p.qty;
+      state.history.unshift({id:uid(),type:'Versand',date:issue.date,issue_id:issue.id,issue_number:issue.number,article_id:p.article_id,article:p.article,qty:-p.qty,user:issue.user,customer:issue.customer,project:issue.project,tracking_code:issue.tracking_code,serials:p.serials,comment:issue.purpose});
     });
     state.issues.unshift(issue);persist();
   }
